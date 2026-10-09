@@ -1,0 +1,27 @@
+# ==============================================================================
+# 参赛方案运行环境声明文件
+# ==============================================================================
+
+hardware:
+  platform: "Hygon DCU"
+  chip_model: "BW100"
+  num_devices: 2
+  interconnect: "PCIe / Hygon Interconnect"
+
+software:
+  os: "Ubuntu 22.04 LTS"
+  dtk_version: "dtk2604"
+  python_version: "3.10"
+  framework: "SGLang"
+  framework_version: "0.5.12"
+  docker_image: "harbor.sourcefind.cn:5443/dcu/admin/base/sglang:0.5.12-ubuntu22.04-dtk2604-py3.10"
+
+model:
+  base_model: "Qwen3.8-27B"
+  served_name: "Qwen3.8-27B-Channel-INT8-w8a8"
+  quantization_method: "Channel-wise INT8 (W8A8)"
+  weight_dtype: "int8"
+  activation_dtype: "int8"
+  kv_cache_dtype: "bfloat16"
+  tensor_parallel_size: 2
+  context_length: 131072
