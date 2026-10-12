@@ -48,6 +48,16 @@ case "${COMMAND}" in
     bash "${SCRIPTS_DIR}/run_bench_sharegpt.sh"
     ;;
 
+  accuracy)
+    shift
+    bash "${SCRIPTS_DIR}/run_accuracy.sh" "$@"
+    ;;
+
+  accuracy-native)
+    shift
+    bash "${SCRIPTS_DIR}/run_accuracy_native.sh" "$@"
+    ;;
+
   all)
     echo "=== 启动全量评测任务 ==="
     if ! check_server_ready; then
@@ -73,7 +83,7 @@ case "${COMMAND}" in
 
   *)
     echo "未知命令: ${COMMAND}"
-    echo "可用命令: start-server | bench-fixed | bench-sharegpt | all | stop-server"
+    echo "可用命令: start-server | bench-fixed | bench-sharegpt | accuracy {prepare|run|report} | accuracy-native {prepare|config|run|infer|eval|report} | all | stop-server"
     exit 1
     ;;
 esac

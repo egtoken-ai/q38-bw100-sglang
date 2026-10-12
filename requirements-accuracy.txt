@@ -1,0 +1,15 @@
+# Install in a separate Python 3.10 Linux venv, never into the DCU server env.
+# Fixed upstream revisions used by scripts/accuracy.py.
+opencompass @ git+https://github.com/open-compass/opencompass.git@1543bd270b6fbabb1a118307f78d4144e8296467
+vlmeval @ git+https://github.com/open-compass/VLMEvalKit.git@21e52b8df8ce1f628e93c82de547edb2c985f6ac
+# LiveCodeBench executes generated Python via pyext.RuntimeModule.
+pyext==0.7
+setuptools<81
+numpy>=1.24,<2
+datasets>=3.0,<4
+# Keep the datasets 3.x / legacy model-import stack on compatible major APIs.
+transformers>=4.51,<5
+huggingface_hub>=0.34,<1
+# Newer OpenCV wheels require numpy>=2, incompatible with OpenCompass.
+opencv-python<4.12
+opencv-python-headless<4.12

@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 env/
 venv/
+.venv-accuracy/
+data/accuracy/
 
 # Logs & Benchmark results
 logs/*.log

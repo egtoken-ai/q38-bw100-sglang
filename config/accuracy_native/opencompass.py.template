@@ -1,0 +1,60 @@
+# Generated from config/accuracy_native/opencompass.py.template.
+# Run with: opencompass <this-file> --work-dir <dir> --reuse native --mode all
+from mmengine.config import read_base
+
+with read_base():
+    from opencompass.configs.datasets.gsm8k.gsm8k_gen_1d7fe4 import gsm8k_datasets
+    from opencompass.configs.datasets.livecodebench.livecodebench_v6_academic import LCBCodeGeneration_dataset
+
+from opencompass.models import OpenAISDK
+from opencompass.partitioners import NaivePartitioner
+from opencompass.runners import LocalRunner
+from opencompass.tasks import OpenICLInferTask, OpenICLEvalTask
+from opencompass.utils.text_postprocessors import extract_non_reasoning_content
+
+_settings = @@SETTINGS@@
+# commands.sh / the outer runner export COMPASS_DATA_CACHE and ACCURACY_LCB_FILE.
+# Keep config parsing free of environment mutations: MMEngine uses lazy imports.
+
+if _settings['benchmark'] == 'gsm8k':
+    datasets = gsm8k_datasets
+    datasets[0]['path'] = _settings['gsm8k_path']
+    datasets[0]['infer_cfg']['inferencer']['max_out_len'] = _settings['gsm8k_max_tokens']
+    _max_out_len = _settings['gsm8k_max_tokens']
+else:
+    datasets = [LCBCodeGeneration_dataset]
+    datasets[0]['abbr'] = 'livecodebench_v6'
+    datasets[0]['n'] = 1
+    datasets[0]['eval_cfg']['evaluator']['num_process_evaluate'] = _settings['eval_workers']
+    datasets[0]['eval_cfg']['evaluator']['timeout'] = _settings['code_timeout']
+    _max_out_len = _settings['max_tokens']
+
+models = [dict(
+    abbr='q38', type=OpenAISDK, path=_settings['model'], key='ENV',
+    openai_api_base=_settings['base_url'], tokenizer_path=_settings['tokenizer_path'],
+    meta_template=dict(round=[
+        dict(role='HUMAN', api_role='HUMAN'),
+        dict(role='BOT', api_role='BOT', generate=True),
+    ]),
+    temperature=_settings['temperature'],
+    openai_extra_kwargs=dict(top_p=1.0, seed=_settings['seed']),
+    extra_body=_settings['extra_body'],
+    max_out_len=_max_out_len, max_seq_len=131072,
+    batch_size=_settings['concurrency'], max_workers=_settings['concurrency'],
+    query_per_second=_settings['concurrency'], retry=3, timeout=_settings['timeout'],
+    pred_postprocessor=dict(type=extract_non_reasoning_content),
+    run_cfg=dict(num_gpus=0),
+)]
+
+infer = dict(
+    partitioner=dict(type=NaivePartitioner),
+    runner=dict(type=LocalRunner, max_num_workers=1, task=dict(type=OpenICLInferTask)),
+)
+eval = dict(
+    partitioner=dict(type=NaivePartitioner),
+    runner=dict(type=LocalRunner, max_num_workers=1, task=dict(type=OpenICLEvalTask, dump_details=True)),
+)
+summarizer = dict(dataset_abbrs=[
+    ['gsm8k', 'accuracy'] if _settings['benchmark'] == 'gsm8k'
+    else ['livecodebench_v6', 'pass@1'],
+])

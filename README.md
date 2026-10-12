@@ -2,6 +2,10 @@
 
 本项目面向社区 Qwen3.8 推理性能优化挑战赛（子赛道 B：SGLang），针对海光 BW100 双卡平台与 Qwen3.8-27B-Channel-INT8-w8a8 模型，提供完整的容器配置、推理服务启动脚本以及标准评测执行脚本。
 
+精度准入验证见 [OpenCompass / VLMEvalKit 使用说明](docs/accuracy.md)：支持 GSM8K、LiveCodeBench v6（175 题）、RealWorldQA 和 MathVision testmini（304 题），包含自动下载、缓存复用、逐题续跑及 Markdown/CSV/JSON 报告。入口：`bash scripts/run_accuracy.sh run`，需先按说明安装独立评测环境并启动模型服务。
+
+新增 **[原生配置＋命令版本](docs/accuracy-native.md)**：`bash scripts/run_accuracy_native.sh run`，真正调用 OpenCompass CLI 和 VLMEvalKit `run.py`，由框架执行推理、评分与续跑。MathVision 完整评分需配置独立 Judge API；原来的 Python API 版本仍保留。
+
 ---
 
 ## 一、目录结构
