@@ -161,3 +161,31 @@ Docker环境短暂不可用导致有界Triton GEMM父流程中断；恢复后镜
 | 64K/1K C1 | 15.901140 | 10.380501 | 34.72% | 25.618 | 28.925 |
 
 结果`result/quick/ttft-metadata-pack/20261015-173302-OByAtv/`，镜像`sglang-bw100:ttft-metadata-pack-issue3`。CPU metadata日志实际命中；K/V及metadata局部逐值检查均通过。6项输出回归与上一GDN32K父候选相同，但与原生的完整精度差异尚需实测任务评估。当前短档仍不达标，不将此前原生随机token数值差异掩盖为精度通过。
+
+
+## 四compute-stream MLP候选的模型反例
+
+真实两类decoder层边界微测输出/残差/norm逐值一致且提升9.62%/9.72%，但完整模型短输入TTFT16.179→54.584s，长输入（guard回退）10.371s。固定套件372秒完成，保存失败数据`result/quick/ttft-mlp-pipeline/20261015-175041-GvKM3e/`。该版本拒绝作为可用优化。
+
+另行CPU-only诊断使用9×4096输入/1输出，仅用于定位，绝不替代固定验收case。两个TP rank的32K step主机提交耗时10.45/10.99s，其中aten::empty累计9.91/10.47s、最长单次883/1044ms；allreduce API CPU累计仅78–82ms。注意这些inclusive CPU事件嵌套，不能将算子总计相加。证据`result/ttft/pipeline-cpu-diagnostic/analysis.json`。
+
+结合完整服务约93%设备显存占用、微测每轮synchronize，优先验证跨stream分配/延迟复用导致的压力，而不是把微测收益直接外推。后续先审查单compute-stream异步通信或严格双向fence的lifetime修正；保留原失败版本和原case要求。
+
+
+## 当前stream修正与GEMM组合
+
+连续64层、8GiB可用余量微测确认旧版每轮10/11次分配重试与全流同步，修正版0次；最终输出/残差均逐值一致。12组实际INT8模块全量exact，9组满足8轮全快且中位提升≥2%的白名单门槛。组合镜像`sglang-bw100:ttft-current-gemm-issue3`已真实命中两条路径。
+
+270秒固定suite结果：短TTFT15.091597s（提升15.04%）、长10.335549s（提升35.00%）；TPS710.645/25.561，TPOT75.236/29.056ms。结果`result/quick/ttft-current-gemm/20261015-181937-dugWWz/`。短输入尚差约0.881秒才到20%，继续验证连续Prefill先处理输出、内部chunk/子批选择，不改case。全部130个请求输出hash与metadata+KV父候选相同；这不替代与原生模型的任务精度回归。
+
+
+## 连续Prefill结果处理顺序
+
+镜像已有官方 `SGLANG_DISABLE_CONSECUTIVE_PREFILL_OVERLAP` 选项：连续Extend时先处理上一批结果，再提交下一批。保持Decode overlap、32K chunk和9形状GEMM白名单。实际模型环境确认为1，固定suite270秒完成。
+
+| 固定case | 安擎基线TTFT(s) | 优化TTFT(s) | TTFT提升 | 优化TPS | 优化TPOT(ms/token) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 4K/1K C64 | 17.762641 | 14.714893 | 17.16% | 708.211 | 75.895 |
+| 64K/1K C1 | 15.901140 | 10.350391 | 34.91% | 25.501 | 29.133 |
+
+结果 `result/quick/ttft-prefill-release/20261015-183754-FJen1s/`；正式测量65/65输出hash与metadata+KV父候选相同，预热59/65相同（短档6个不同），不能称全部130请求一致。相对current-stream+GEMM父配置短TTFT进一步提升约2.50%，但单次测量不证明全部来自该调度开关；需要最终重复A/B。每个case20%的总体Goal仍未达成，短档距阈值14.210112s还差约0.505秒。

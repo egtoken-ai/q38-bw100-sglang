@@ -175,6 +175,24 @@ bash scripts/run_bench_quick.sh gdn-opt
 尤其 C1 只有一个正式请求，波动较大；不能将其与完整压测的多轮、多波次结果视为等价。
 确认收益后仍运行 `run_bench_fixed.sh all` 做完整性能回归；性能 PASS 不代表模型精度通过。
 
+保存实际镜像、启动参数及受控环境后，可生成逐 case 对比：
+
+```bash
+# 在Docker服务器执行，每次实验保存到该次结果目录
+python3 scripts/capture_ttft_deployment.py --container <目标容器> \
+  --output <本次结果目录>/deployment.json
+python3 scripts/compare_ttft_quick.py --baseline <安擎原生结果目录> \
+  --candidate <优化结果目录> --output-prefix <优化结果目录>/comparison
+```
+
+对比工具核对两个固定case、请求和token完整性、随机种子、脚本指纹及≤480秒套件时长。
+逐项判断TTFT提升是否达到20%，不取跨case平均；单对快测通过也不会标记最终Goal完成。
+
+优化源码、逐项回退和镜像构建文件位于 `patch/`。完整依赖链见
+[候选镜像构建说明](patch/BUILD_TTFT_CANDIDATE.md)，可先运行
+`bash patch/build_ttft_candidate.sh --dry-run --from native` 查看并检查构建命令。
+
+
 ### 3. ShareGPT 真实对话数据集测试
 
 基于官方标准文件 `ShareGPT_V3_unfiltered_cleaned_split.json`，每档进行 1000 个正式请求，使用 $2 \times \text{并发}$ 个请求进行预热，执行 3 轮正式测试。

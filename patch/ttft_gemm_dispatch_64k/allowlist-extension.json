@@ -1,0 +1,80 @@
+{
+  "status": "MICRO_VALIDATED_REQUIRES_MODEL_VALIDATION",
+  "candidate_shapes": [
+    [
+      65536,
+      17408,
+      5120
+    ],
+    [
+      65536,
+      8192,
+      5120
+    ],
+    [
+      65536,
+      5120,
+      3072
+    ]
+  ],
+  "approved_shapes": [
+    [
+      65536,
+      5120,
+      3072
+    ]
+  ],
+  "selection_rule": "full_output_exact and native_dispatch_hits == 1 and all eight paired improvements > 0 and median improvement >= 2 percent",
+  "existing_evidence": "result/ttft/gemm-dispatch-shared-import.json",
+  "source_worker_sha256": "4e60072b900b06592515459da9877a80e54917e8ddbcd669d569e3c0043b17a2",
+  "result_path": "result/ttft/gemm-dispatch-m65536.json",
+  "result_sha256": "88f80bb601bf843ca918e9fe41ec45d4fcfd919a782f7196c502a12337d28175",
+  "decisions": [
+    {
+      "shape": [
+        65536,
+        17408,
+        5120
+      ],
+      "decision": "retain_original_asm",
+      "reason": "not all eight paired comparisons faster",
+      "full_output_exact": true,
+      "native_dispatch_hits": 1,
+      "asm_median_ms": 30.083072662353516,
+      "candidate_median_ms": 29.388809204101562,
+      "median_improvement_pct": 2.3078209664425886,
+      "min_paired_improvement_pct": -0.9907723345467304
+    },
+    {
+      "shape": [
+        65536,
+        8192,
+        5120
+      ],
+      "decision": "retain_original_asm",
+      "reason": "median improvement below 2 percent",
+      "full_output_exact": true,
+      "native_dispatch_hits": 1,
+      "asm_median_ms": 14.306593577067058,
+      "candidate_median_ms": 14.12942123413086,
+      "median_improvement_pct": 1.2383964217743615,
+      "min_paired_improvement_pct": 0.6596027129702247
+    },
+    {
+      "shape": [
+        65536,
+        5120,
+        3072
+      ],
+      "decision": "eligible_for_model_validation",
+      "reason": "full exact, hit1, all eight paired faster, median >=2 percent",
+      "full_output_exact": true,
+      "native_dispatch_hits": 1,
+      "asm_median_ms": 5.758983929951985,
+      "candidate_median_ms": 5.538105010986328,
+      "median_improvement_pct": 3.835380019327451,
+      "min_paired_improvement_pct": 3.748217041649399
+    }
+  ],
+  "service_allowlist_modified": false
+}

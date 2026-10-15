@@ -65,3 +65,21 @@ python3 /bench/patch/ttft_silu_triton/bench_silu_int8.py \
 If the candidate is not faster than both the unfused and native-fused alternatives
 at prefill sizes, reject it. Positive microbenchmark results still require actual
 model correctness, dispatch evidence, and the unchanged matched TTFT cases.
+
+## Measured decision
+
+The corrected recovery run (`result/ttft/issue3-attention/silu-triton-rounded-recovery.json`)
+matched the baseline's full quantized output and scales exactly. The four-warp
+Triton variant was nevertheless slower in the prefill shapes:
+
+| Tokens | Baseline graph ms | Triton 4-warps graph ms |
+| --- | --- | --- |
+| 4096 | 0.363862 | 0.373816 |
+| 8192 | 0.716906 | 0.739524 |
+| 16384 | 1.422995 | 1.470705 |
+
+The 128-token result was 0.016346 ms versus 0.015480 ms, but that small-shape
+microbenchmark result does not justify integration for this TTFT objective.
+**Decision: reject this candidate for service integration.** The initial
+numerically different run remains a separate historical record; the exact
+corrected implementation and diagnostic are retained for reproducibility.
