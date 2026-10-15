@@ -84,6 +84,10 @@ LAUNCH_CMD=(
   --enable-metrics
 )
 
+if [ -n "${PACK_PAGED_KV_TO_VARLEN:-}" ]; then
+  LAUNCH_CMD+=(--pack-paged-kv-to-varlen "${PACK_PAGED_KV_TO_VARLEN}")
+fi
+
 if [ "${RUN_IN_BACKGROUND}" = true ]; then
   echo "正在后台启动服务，日志记录至: ${LOG_FILE}"
   nohup "${LAUNCH_CMD[@]}" > "${LOG_FILE}" 2>&1 &

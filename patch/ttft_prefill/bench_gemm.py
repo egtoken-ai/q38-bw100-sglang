@@ -27,9 +27,13 @@ def timed(fn):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--output', required=True)
+    p.add_argument('--float-carrier-only', action='store_true',
+                   help='Explore exact integer operands in FP16/BF16 with FP32 output')
     args = p.parse_args()
     torch.set_num_threads(4)
     torch.manual_seed(20261015)
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
     results = []
     for m in [4096, 8192, 16384]:
         for n, k in [(17408, 5120), (5120, 8704), (8192, 5120), (5120, 3072)]:
@@ -54,6 +58,17 @@ def main():
                     a, sa, b, sb, torch.bfloat16, None),
             }
             packed_rocblas = weight.t().contiguous().reshape(n, k).t()
+            if args.float_carrier_only:
+                weight_bf16 = weight.to(torch.bfloat16).t()
+
+                def float_carrier(dtype, w):
+                    raw = torch.mm(a.to(dtype), w, out_dtype=torch.float32)
+                    return (raw * sa * sb.t()).to(torch.bfloat16)
+
+                choices = {
+                    'baseline-lightop': baseline,
+                    'bf16-integer-carrier': lambda: float_carrier(torch.bfloat16, weight_bf16),
+                }
             for name, fn in choices.items():
                 row = dict(m=m, n=n, k=k, candidate=name)
                 try:
