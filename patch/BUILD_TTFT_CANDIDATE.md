@@ -54,3 +54,9 @@ bash patch/build_ttft_candidate.sh --from native --target current-gemm \
 ## 本次检查范围
 
 已完成 Bash 语法、native→prefill-release 与 issue1→current-gemm 两条 dry-run、逐层命令/父 tag 核对、w4 默认配置及失败 helper SHA 依赖检查。只读查询了 BW100 现存 tag、layer 前缀和最终环境变量。没有实际执行此次 build，也没有 GPU 或服务操作；镜像构建是否通过仍由各层安装器的实际 SHA guard 检验。
+
+## 64K/8子批与官方QK融合候选
+
+新增 `--target qk-gate`：在prefill-release之后依次构建 `current_stream_parts`、`ttft_qk_norm_gate`，两个父镜像均显式override，最终tag为 `ttft-qk-gate-<suffix>`。可运行 `bash patch/build_ttft_candidate.sh --dry-run --from native --target qk-gate`。服务另行显式设置 `CHUNKED_PREFILL_SIZE=65536 MAX_PREFILL_TOKENS=65536 SGLANG_QWEN27B_MLP_PIPELINE_PARTS=8 MEM_FRACTION_STATIC=0.80` 和GPU4/5；构建不会偷偷更改这些服务参数。生产helper默认仍4子批。
+
+该组合已构建为 `sglang-bw100:ttft-qk-gate-64k-v2-issue3`。v1在启动时发现Python后缀模型备份被自动扫描，v2将备份改为 `.py.ttft_qk_original`，保留失败记录；v1没有性能结果。64K/8真实MLP边界与QK融合各自全量逐值检查通过，但组合模型结果独立验收。

@@ -1,0 +1,11 @@
+{
+  "upstream_pr": "https://github.com/sgl-project/sglang/pull/27656",
+  "upstream_commit": "0da18f8d916eb2d99b7382851d19426554a74cf3",
+  "upstream_source_sha256": "4db06eafd437707bdd9d136eaae202d9cad6fec514f996c976643598d2f10ddc",
+  "zero_grid_guard_commit": "6314e9e4f5bdadd975969e8781dd1edcb27bb4a7",
+  "vendor_container": "qwen38_bw100_ttft_prefill_release",
+  "vendor_files": {
+    "models/qwen3_5.py": "edba904e2ac086296c3f64460fcc18220e4f91a0680272c96598e41ef8d34fdc",
+    "models/utils.py": "774a83d6bd492ef93922f8a3c24724132d3f9b345879b897c90fdb4037801efb"
+  }
+}
