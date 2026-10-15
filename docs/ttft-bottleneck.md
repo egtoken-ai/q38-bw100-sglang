@@ -106,4 +106,48 @@ RCCL显式Ring/Simple和默认几乎一致，Tree/Simple更慢：8192×5120 BF16
 - GDN post-conv prepare融合在6种布局/长度上通过检查；token-major8192阶段0.3751→0.1469ms，Q/K最大绝对差0.001953125，V/g/beta逐值一致，小序列chunk输出最大绝对差0.00012207、state差0。候选采用4warps，补丁位于 `patch/ttft_gdn_prepare/`。
 - 更新后的views微测确认真实GPU conv返回QKV两臂stride均(5120,1)，未产生布局退化；8192 tokens含split/conv/gating/norm约1.292→0.847ms，仍不包含完整recurrence。
 
-真实模型组合候选 `sglang-bw100:ttft-gdn-prepare-w4-issue3` 正在固定套件验证；原生GEMM/RCCL保留，仅叠加packed、GDN views/prepare及32K服务分块。原始记录仍在 `result/ttft/issue3-attention/` 和 `result/quick/`，未纳入Git。
+真实模型组合候选 `sglang-bw100:ttft-gdn-prepare-w4-issue3` 固定套件已通过长度/成功数检查，用时275秒；原生GEMM/RCCL保留，仅叠加packed、GDN views/prepare及32K服务分块。原始记录仍在 `result/ttft/issue3-attention/` 和 `result/quick/`，未纳入Git。
+
+
+## 组合候选模型结果和命中证据
+
+| 固定 case | 安擎基线 TTFT P50(s) | GDN组合 TTFT P50(s) | TTFT 提升 | TPS | TPOT(ms/token) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 4K/1K C64 | 17.778396 | 16.392254 | 7.80% | 692.312 | 76.328 |
+| 64K/1K C1 | 15.906568 | 10.380586 | 34.74% | 25.556 | 29.020 |
+
+结果目录：`result/quick/ttft-gdn32k/20261015-155735-OZY6Pf/`。部署快照保存实际argv/env和镜像ID；未达到逐case20%的总体目标。
+
+4K C1诊断trace确认48次 `fused_gdn_prefill_prepare_kernel` 和16次Hygon FlashAttention，证明模型实际进入移植路径。累计GPU kernel时间543.6ms，当前INT8 GEMM占40.24%，RCCL主kernel占22.30%；它仍可能包含一次额外decode，不能直接当C64墙钟分解。
+
+4个简单确定性问答仍与原生相同且答案正确；4K/64K随机token的greedy序列不相同。共同历史teacher-forcing原生参考已采集。组合候选随机4K/64K的平均绝对logprob差分别约0.334/0.186、最大约1.575/0.544；packed单独候选4K出现更大单点差。原生prefill与自身逐token decode也有明显差异，不能把这种诊断直接当成任务精度分数；完整精度回归仍未通过验收。
+
+一阶段BF16 custom all-reduce通过真实双向P2P/IPC和四档精确求和，但8192tokens约2.196ms vs RCCL1.835ms，更慢；不接入服务。保持真实PCIe拓扑，未伪造full_nvlink。
+
+
+## 有界 GEMM 与通信边界筛选
+
+- hipBLASLt实际原生调用只请求一个heuristic且workspace为0。4个投影形状分别枚举32算法、workspace0/128MiB后，增加workspace未显示明显收益。新C ABI prototype曾因alpha/beta scalar ABI错误失败，已改为INT32(1/0)并在4种形状与ASM逐值一致；FP32 vector scales不变。修正后的原型与既有hipBLASLt速度一致，不安装额外native库。
+- 既有hipBLASLt在M8192的up/QKV/out形状约比ASM快3%–4%，down略慢；不能把该小范围GEMM收益声称为模型20%。
+- RS→局部GemmaNorm/INT8 quant→AG INT8+FP32 scale边界在三档全部逐值一致，边界自身提升仅2.07%/6.27%/11.12%（M4096/8192/16384）。考虑GDN未量化BA消费者和跨层残差接入成本，暂不进行复杂模型改造。
+- 新Triton SiLU原型首轮遗漏SiLU后、乘up前的BF16舍入，已通过独立探针定位；不会放宽阈值接入错误公式。保留原失败数据，修正后必须quant与scale全量逐值一致。
+
+
+## 环境恢复后的验证（2026-10-15）
+
+Docker环境短暂不可用导致有界Triton GEMM父流程中断；恢复后镜像、容器、模型和项目目录均已返回。重新测原生镜像，避免将不同环境的结果直接相除。固定两档和轮次不变，新原生基线用时303秒：
+
+| case | 安擎基线 TTFT(s) | TPS | TPOT(ms/token) |
+| --- | ---: | ---: | ---: |
+| 4K/1K C64 | 17.762641 | 659.018 | 79.725 |
+| 64K/1K C1 | 15.901140 | 19.954 | 34.619 |
+
+记录：`result/quick/ttft-native-recovery/20261015-171727-99PbBj/`，实际镜像/argv/env快照在deployment.json。
+
+- 修正SiLU两次BF16舍入后，四档量化/scale全量逐值一致，但8192阶段0.7395ms vs原生0.7169ms，拒绝接入。
+- MLP-only输出AR重叠三档提升−8.48%/−0.54%/+0.68%，拒绝接入。
+- 加入输入AR、真实GemmaNorm和残差的完整MLP边界，在32768 tokens四子批提升9.87%（38.857→35.023ms），输出/norm/residual逐值一致；这只支持继续原型接入，不代表模型TTFT提升。
+- 新直接KV打包移除逐请求index_select/permute复制/cat，12组布局/长度/tile全量K/V逐值一致。8×4096打包1.052→0.489ms；64K单序列1.317→0.974ms。候选位于`patch/ttft_kv_pack/`，需要模型测试。
+- GDN CPU元数据候选参照官方vLLM已合并#38361，提前构造chunk索引/offset和initial-state mask，避免旧GPU长度转CPU及逐层重复构造；官方记录本身没有证明TTFT改善，因此本项目独立验证。
+
+整体Goal仍未达到每个case≥20%的要求；恢复前7.80%/34.74%只作为历史结果保留。

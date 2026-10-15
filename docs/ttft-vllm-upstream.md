@@ -138,3 +138,70 @@ INT8 AG 可以进一步减少 norm 后传输量，但涉及量化 consumer 接�
 若微测没有明确优势，不制作新的模型镜像。若有优势再接模型，验证全部层实际路径、相同历史 logprobs、真实任务精度，并对固定两个 case 做 matched A/B。由于预计只消除少量 norm 重复计算，该候选优先级低于已经找到的更大 GDN/Attention/调度瓶颈，不能借改并发、输出长度或模型精度放大表面收益。
 
 最终取舍：主任务决定不实现 BF16 sequence-parallel norm。现有配置不能安全启用，预计收益小、涉及跨层 residual 语义，当前优先级不足；这不是证明其在 BW100 一定无收益。
+
+## 补充核查：hipBLASLt 真实 dispatch 与未枚举的算法空间
+
+本项核查了镜像 Python 包装、`lmslimquant` native 符号与函数反汇编、DTK 头文件、`hipblaslt-bench --help`。只按主任务授权把不可执行的 bench 原文件复制至容器 `/tmp/q38-hipblaslt-bench-help` 并为副本增加执行权限；没有更改原安装文件，没有运行 GPU 性能测试。
+
+之前 `patch/ttft_prefill/bench_gemm.py` 中的 `gemm_ops.hipblaslt_w8a8_gemm` **确实调用 hipBLASLt，不是在 Python 层回落到 lightop ASM**：
+
+```text
+lightop.gemm_ops.hipblaslt_w8a8_gemm
+  → lightop._lmslim_native.quantize.quant_ops.hipblaslt_w8a8_gemm
+  → torch.ops.lmslim.blaslt_w8a8_bf16_gemm
+  → lmslimquant.blaslt_w8a8_bf16_gemm
+  → hipblaslt_gemm::w8a8_bf16_gemm
+  → hipblasLtMatmulAlgoGetHeuristic → hipblasLtMatmul
+```
+
+native 函数起始地址为该镜像 `lmslimquant.cpython-310-x86_64-linux-gnu.so` 的 `0x27153e0`。`0x271587c` 调用 heuristic，`0x27159c6` 调用 matmul；未见调用 `gemm_w8a8_smooth`。这证明不同 dispatch API，但仍可能选择性能相近的底层 ISA kernel，不能只凭名字认定不同算法已全面比较。
+
+更关键的缺口是该 native wrapper 只请求 **1 个 heuristic solution**，workspace preference 为零，matmul 的 workspace pointer/size 也为零。Python API 不暴露 solution index 或 workspace。已测结果只代表这一选择，没有遍历 hipBLASLt 算法空间。另一个 `hipblaslt_w8a8_channelwise_gemm` v2 wrapper 也请求单个零 workspace heuristic，不应包装成已经完成的全面算法搜索。
+
+精确类型配置也不能误写：旧 wrapper 使用 A/B=INT8、C=INT32、D=BF16、compute=INT32、scale type=FP32、A/B outer vector scales。反汇编 `BlasltMatmulDesc` 初始化是 compute enum 9、scalar enum 0，C layout enum 10、D layout enum 14；对应 DTK `hipblas.h` 和 `hip/library_types.h` 的枚举。DTK `hipblaslt_common.yaml:309` 同样列出此组合。`C/D=BF16 + compute=FP32` 是另一个组合，不是旧微测的精确复现。
+
+已验证本容器 bench 的 `--help` 支持：
+
+- `--scaleA 2 --scaleB 2`：向量 scale。
+- `--algo_method heuristic --requested_solution 32`：有界请求32解；`--algo_method all` 也存在，但初筛不建议无界枚举。
+- `--algo_method index --solution_index ID`：指定 solution（帮助里的“algo_method 2”是旧描述，枚举值列表支持 index）。
+- `--workspace`、`--cold_iters`、`--iters`、`--use_gpu_timer`、`--print_kernel_info`。
+- `--api_method mix/cpp` 时还暴露 `--splitk`、`--wgm`；先测基础算法，不混入额外调参。
+
+可由主任务在 GPU 空闲时执行的第一组独立 micro 命令如下。这里交换了矩阵 M/N：原 PyTorch 输出 `[8192,17408]` 为 row-major，等价于 BLAS column-major `[17408,8192]`，weight 作为 A、activation 作为 B：
+
+```bash
+HIP_VISIBLE_DEVICES=4 CUDA_VISIBLE_DEVICES=4 \
+HIPBLASLT_TUNING_USER_MAX_WORKSPACE=0 \
+HIPBLASLT_TUNING_FILE=/bench/result/ttft/hipblaslt-ws0-tuning.txt \
+timeout 120 /tmp/q38-hipblaslt-bench-help \
+  -m 17408 -n 8192 -k 5120 \
+  --transA T --transB N --lda 5120 --ldb 5120 --ldc 17408 --ldd 17408 \
+  --a_type i8_r --b_type i8_r --c_type i32_r --d_type bf16_r \
+  --compute_type i32_r --scale_type f32_r --scaleA 2 --scaleB 2 \
+  --alpha 1 --beta 0 --initialization rand_int \
+  --api_method c --algo_method heuristic --requested_solution 32 \
+  --workspace 0 --cold_iters 3 --iters 5 --use_gpu_timer --print_kernel_info
+```
+
+第二轮可把 workspace 和 `HIPBLASLT_TUNING_USER_MAX_WORKSPACE` 都改为 `134217728`，使用独立 tuning 文件。若仅128MiB workspace 的算法有收益，不能把它写入现有零 workspace wrapper 的 override 后直接称作可用；必须新建显式分配并传入 workspace 的 native 接口。更改 problem shape 时同步改变 lda/ldb/ldc/ldd，不能仅修改 M/N。
+
+镜像 libhipblaslt 的可读字符串包含 `HIPBLASLT_TUNING_OVERRIDE_FILE`、`HIPBLASLT_TUNING_FILE`、`HIPBLASLT_TUNING_USER_MAX_WORKSPACE`、`TENSILE_SOLUTION_INDEX` 和日志变量。其用途与 [AMD 官方离线调优文档](https://rocm.docs.amd.com/projects/hipBLASLt/en/docs-6.4.1/how-to-use-hipblaslt-offline-tuning.html) 一致：bench 保存最优选择，override 文件用于运行时读取。**本项只确认库包含相应配置支持，尚未做 runtime 命中验证。** 零 workspace winner 可先在独立 Python micro 进程加载 override，打开 kernel/solution 日志验证真实命中；不能仅因为设置环境变量就宣称生效。
+
+算法筛选必须在同一 INT8 数据、per-token/per-channel scale 和 BF16 输出上重新做数值检查，再做 model A/B。bench 内部纯 GEMM 时延也不含原 Python wrapper 每次重建 descriptor/heuristic 的 host 成本，不能与端到端 TTFT直接换算。现有 ASM mode0–10 已测收益仅约噪声级，不重复该枚举。
+
+标量 ABI 更正：descriptor 的 `HIP_R_32F` scale type 不意味着这个 DTK `COMPUTE_32I` 路径的 alpha/beta 指针应指向float。镜像 `quant_ops.py:716–718` 明确构造 CPU INT32 的1和0传入native，bench符号也有 INT8/BF16/int compute 特化。首版缓存原型误用float标量，已被独立micro的全输出检查拒绝；两处标量改为INT32，向量scale仍FP32，未降低正确性要求。
+
+## 恢复后新增候选：仅保留两个明确源码缺口
+
+以下核查只读取恢复后的 `qwen38_bw100_ttft_prepare`，没有运行GPU或改服务。固定两个正式case、关闭prefix cache等验收条件不变。
+
+**候选一：CPU预建GDN chunk metadata，消除step中的第一次同步。** 官方 [vLLM PR #38361](https://github.com/vllm-project/vllm/pull/38361) 已合并，commit `cb10b7e80b138f876079c2cd697df29f0965b885`；`GDNAttentionMetadataBuilder` 从已有CPU长度计算indices/offsets，异步H2D并作为显式参数穿过FLA链。当前镜像 `layers/attention/fla/index.py:27` 仍在GPU长度上 `.tolist()`，`chunk.py:104`仍在算子内构造；identity cache只避免同step后续重复同步，不能消除第一次。可同时把 `gdn_backend.py:418` 每个GDN层重复的 `extend_prefix_lens > 0` 提前到共享metadata。
+
+此候选是明确消除CPU/GPU串行屏障，不是已有TTFT收益证明：上游PR正式prefill测试Mean TTFT由14.020s到14.274s，作者认为属于噪声；不能拿其局部trace差异承诺当前提升20%。移植需对当前vendor chunk64索引逐元素相同，并确保 `chunk_fwd_o` 等全部consumer接收新metadata，否则仍会走旧缓存路径。非GDN、spec与不支持的mode保留原fallback。
+
+**候选二：把paged KV→varlen的逐请求Python pack改为一个直接gather kernel。** 当前 `pack_paged_kv_to_varlen.py:107–119` 每层按请求循环，反复page indices转long、K/V `index_select`、layout转换/reshape、最后`cat`。各层KV内容不同，不能跳过实际读取；但可以复用该step的page/sequence映射并合并内存遍历，减少CPU launch和临时tensor。
+
+官方参考为 [vLLM ROCm AITER FA 的 cp_mha_gather_cache_kernel](https://github.com/vllm-project/vllm/blob/47ccf6c57d92f03630ebcbad3809450545825488/vllm/v1/attention/backends/rocm_aiter_fa.py)，来源 [PR #25763](https://github.com/vllm-project/vllm/pull/25763)，合并commit `dc937175d496a801f175b5dcce6a8157506bae52`。它在一个Triton kernel里通过token→batch、cu_seqlens、block_table定位并直接写连续K/V。可借鉴算法，但不能原样复制NHD/SHUFFLE布局：当前HCU是K `[pages,Hkv,page,D]`、V `[pages,Hkv,D,page]`，V feature stride尤其不同，必须显式传全部stride。固定BF16，不做dequant或dtype转换；packed输出可要求位相同。需要测随机page顺序、尾页、不同seq长度与前缀，再确认模型原有varlen attention路径不变。
+
+第二项只移动/复用metadata、减少pack开销，没有跳过prefill或隐藏prefix cache命中，适合当前短case的多请求batch；仍须端到端A/B，尚无BW100收益数字。不要把上游AMD backend支持写成该HCU移植已验证。
