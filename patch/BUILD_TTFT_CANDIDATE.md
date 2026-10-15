@@ -60,3 +60,9 @@ bash patch/build_ttft_candidate.sh --from native --target current-gemm \
 新增 `--target qk-gate`：在prefill-release之后依次构建 `current_stream_parts`、`ttft_qk_norm_gate`，两个父镜像均显式override，最终tag为 `ttft-qk-gate-<suffix>`。可运行 `bash patch/build_ttft_candidate.sh --dry-run --from native --target qk-gate`。服务另行显式设置 `CHUNKED_PREFILL_SIZE=65536 MAX_PREFILL_TOKENS=65536 SGLANG_QWEN27B_MLP_PIPELINE_PARTS=8 MEM_FRACTION_STATIC=0.80` 和GPU4/5；构建不会偷偷更改这些服务参数。生产helper默认仍4子批。
 
 该组合已构建为 `sglang-bw100:ttft-qk-gate-64k-v2-issue3`。v1在启动时发现Python后缀模型备份被自动扫描，v2将备份改为 `.py.ttft_qk_original`，保留失败记录；v1没有性能结果。64K/8真实MLP边界与QK融合各自全量逐值检查通过，但组合模型结果独立验收。
+
+## NUMA与输出后处理组合
+
+`--target postops` 继续在qk-gate之后构建numa4→fa-gate→postops。最后一层只增加已验证的 `(65536,5120,3072)` hipBLASLt形状，其他两个64K形状仍拒绝。FA门控保留原sigmoid的BF16中间舍入。启动时使用 `/opt/ttft-numa/start_server.sh --daemon`，该脚本硬性限定GPU4/5、TP2和 `--numa-node 4 4`，镜像设置 `SGLANG_NUMA_BIND_V2=0`。64K/8、mem_fraction0.80等环境需显式设置，保持与上轮对照相同。
+
+NUMA独立固定套件268秒：TTFT提升19.13%/35.22%，正式及预热130个输出hash全与qk64父候选相同；单轮约0.15%的额外短档差异不足以证明稳定收益。父配置和结果均保留，Goal未完成。两rank真实CPU亲和 `64-79,192-207`、内存policy `prefer:4` 已由 `ttft_numa/capture_binding.py`验证；postops组合268秒固定suite为19.47%/35.39%，130输出与NUMA父候选相同，仍未完成逐case20%及重复正确性验收。

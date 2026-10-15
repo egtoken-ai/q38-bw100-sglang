@@ -67,4 +67,4 @@ only the backup filename, not the vendor baseline or helper arithmetic.
 
 Root已在保留的GPU4串行运行真实布局micro：0/129（padding64）/4096/8192/32768/65536，非空各两个seed。Q、K、V、gate全量逐值一致、V别名保持，任何失败记录后终止。8192阶段eager耗时与其余结果见原始JSON；32768从3.036592ms到1.681268ms，65536从6.045929ms到3.351328ms。该结果仅包含QKV拆分、QK归一化和gate提取，不能换算为模型TTFT提升。
 
-证据：`result/ttft/issue3-attention/qk-norm-gate.json`、`qk-norm-gate-64k.json`。实际组合镜像构建使用 `--build-arg BASE_IMAGE=sglang-bw100:ttft-current-parts-issue3`，保留父层的调度开关和9形状GEMM白名单。服务测试设置chunk65536/parts8/mem_fraction0.80，模型命中、两固定case和任务精度仍待验证。
+证据：`result/ttft/issue3-attention/qk-norm-gate.json`、`qk-norm-gate-64k.json`。实际组合镜像构建使用 `--build-arg BASE_IMAGE=sglang-bw100:ttft-current-parts-issue3`，保留父层的调度开关和9形状GEMM白名单。服务测试设置chunk65536/parts8/mem_fraction0.80，模型已确认命中，固定suite269秒：短TTFT14.386166s（提升19.01%），长10.319667s（提升35.10%）。正式65输出hash与32K父候选相同，预热59/65相同；完整任务精度与最终重复验收尚未完成。64K分块使短档均值17.324586s高于32K父候选16.023994s，但仍略好于原生17.746731s；不能将P50改善等同均值改善。结果 `result/quick/ttft-qk64-v2/20261015-185539-CLjdvC/`。

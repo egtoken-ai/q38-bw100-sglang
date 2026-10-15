@@ -1,0 +1,5 @@
+ARG BASE_IMAGE=sglang-bw100:ttft-numa4-issue3
+FROM ${BASE_IMAGE}
+COPY install.py /opt/ttft-gemm-dispatch-64k-extension/install.py
+RUN python3 /opt/ttft-gemm-dispatch-64k-extension/install.py
+ENV Q38_HIPBLASLT_SHAPES=4096x8192x5120,8192x17408x5120,8192x8192x5120,8192x5120x3072,16384x17408x5120,16384x8192x5120,16384x5120x3072,32768x8192x5120,32768x5120x3072,65536x5120x3072

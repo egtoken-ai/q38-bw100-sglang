@@ -15,7 +15,7 @@ usage() {
 Usage: bash patch/build_ttft_candidate.sh [options]
   --dry-run                    Validate local source; print build commands only
   --from issue1|native         Start with Issue 1 image, or build it (default issue1)
-  --target current-gemm|prefill-release|qk-gate   Last layer (default prefill-release)
+  --target current-gemm|prefill-release|qk-gate|postops   Last layer (default prefill-release)
   --image-prefix NAME          Output repository (default sglang-bw100)
   --tag-suffix TEXT            Issue 3 tag suffix (default issue3)
   --issue1-image IMAGE         Issue 1 input/output tag (default PREFIX:gdn-kkt-solve-issue1)
@@ -44,7 +44,7 @@ while (($#)); do
   esac
 done
 [[ "$start_from" == issue1 || "$start_from" == native ]] || { printf 'Invalid --from\n' >&2; exit 2; }
-[[ "$target" == current-gemm || "$target" == prefill-release || "$target" == qk-gate ]] || { printf 'Invalid --target\n' >&2; exit 2; }
+[[ "$target" == current-gemm || "$target" == prefill-release || "$target" == qk-gate || "$target" == postops ]] || { printf 'Invalid --target\n' >&2; exit 2; }
 [[ -n "$image_prefix" && -n "$tag_suffix" ]] || { printf 'Empty image prefix/suffix\n' >&2; exit 2; }
 issue1_image=${issue1_image:-"${image_prefix}:gdn-kkt-solve-issue1"}
 
@@ -60,7 +60,8 @@ dockerfiles=['gdn_kkt_solve/Dockerfile','ttft_prefill/Dockerfile','ttft_prefill/
  'ttft_gdn_metadata/Dockerfile','ttft_mlp_pipeline/Dockerfile',
  'ttft_mlp_pipeline/current_stream/Dockerfile','ttft_gemm_dispatch/Dockerfile',
  'ttft_prefill_release/Dockerfile','ttft_mlp_pipeline/current_stream_parts/Dockerfile',
- 'ttft_qk_norm_gate/Dockerfile']
+ 'ttft_qk_norm_gate/Dockerfile','ttft_numa/Dockerfile','ttft_fa_gate/Dockerfile',
+ 'ttft_gemm_dispatch_64k/install_extension/Dockerfile']
 for name in dockerfiles:
  text=(root/name).read_text()
  assert 'ARG BASE_IMAGE=' in text and 'FROM ${BASE_IMAGE}' in text, f'BASE_IMAGE override unavailable: {name}'
@@ -108,17 +109,28 @@ for stage in fa packed gdn-views gdn-prepare-w4 kv-pack metadata-pack mlp-pipeli
   esac
   parent=$tag
 done
-if [[ "$target" == prefill-release || "$target" == qk-gate ]]; then
+if [[ "$target" == prefill-release || "$target" == qk-gate || "$target" == postops ]]; then
   tag=$(image prefill-release)
   build_layer "$parent" "$tag" ttft_prefill_release
   parent=$tag
 fi
-if [[ "$target" == qk-gate ]]; then
+if [[ "$target" == qk-gate || "$target" == postops ]]; then
   tag=$(image current-parts)
   build_layer "$parent" "$tag" ttft_mlp_pipeline/current_stream_parts
   parent=$tag
   tag=$(image qk-gate)
   build_layer "$parent" "$tag" ttft_qk_norm_gate
+  parent=$tag
+fi
+if [[ "$target" == postops ]]; then
+  tag=$(image numa4)
+  build_layer "$parent" "$tag" ttft_numa
+  parent=$tag
+  tag=$(image fa-gate)
+  build_layer "$parent" "$tag" ttft_fa_gate
+  parent=$tag
+  tag=$(image postops)
+  build_layer "$parent" "$tag" ttft_gemm_dispatch_64k/install_extension
   parent=$tag
 fi
 printf 'Final candidate: %s\n' "$parent" >&2
