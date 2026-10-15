@@ -21,7 +21,7 @@ PORT=${PORT:-18580}
 BASE_URL="http://127.0.0.1:${PORT}"
 
 check_server_ready() {
-  curl -s "${BASE_URL}/health" > /dev/null 2>&1
+  curl -fsS --max-time 5 "${BASE_URL}/health" > /dev/null 2>&1
 }
 
 case "${COMMAND}" in

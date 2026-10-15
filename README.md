@@ -145,6 +145,36 @@ python3 -u scripts/benchmark.py \
 
 ---
 
+### 快速优化测试（2 个 case）
+
+`scripts/run_bench_quick.sh` 用于优化迭代筛选。从原有四个 case 中保留
+**4K/1K C64、64K/1K C1**，分别覆盖并发吞吐和长输入单请求性能，case 的输入长度、
+输出长度和并发参数不变。每档 **1 轮预热 + 1 轮正式测试**，每轮请求数等于并发数，
+共 130 个请求（含预热）。保留 1024-token 输出和固定随机种子。
+按已有基线的一波请求耗时估算约 5 分钟（两档各约 98 秒、51 秒，每档两轮），
+目标控制在 8 分钟以内；实际受待测版本、编译和机器负载影响。
+
+在已启动目标服务的容器内执行：
+
+```bash
+cd /bench
+# 预览两个命令，不发送请求、不创建结果目录
+bash scripts/run_bench_quick.sh base --dry-run
+# 原生服务上采集快速基线
+bash scripts/run_bench_quick.sh base
+# 切换为待验证的优化服务后，用相同配置测试
+bash scripts/run_bench_quick.sh gdn-opt
+```
+
+脚本检查服务和模型名称，不自动启动或切换服务。支持 `BASE_URL`、`MODEL_NAME`、
+`RESULT_ROOT` 环境变量。每次运行保存到独立的 `result/quick/<标签>/<时间戳>-<随机后缀>/`，
+包含每档日志、原始请求、进度、TPS/TTFT P50/TPOT P50 汇总 `summary.csv` 与 `summary.json`，
+以及脚本指纹和运行配置。`exit_code=0` 表示全部通过；请求失败或 token 长度不符立即停止后续档位。
+
+原生与优化版本应使用相同快速脚本、硬件、服务参数和空闲机器比较。单轮结果用于筛选，
+尤其 C1 只有一个正式请求，波动较大；不能将其与完整压测的多轮、多波次结果视为等价。
+确认收益后仍运行 `run_bench_fixed.sh all` 做完整性能回归；性能 PASS 不代表模型精度通过。
+
 ### 3. ShareGPT 真实对话数据集测试
 
 基于官方标准文件 `ShareGPT_V3_unfiltered_cleaned_split.json`，每档进行 1000 个正式请求，使用 $2 \times \text{并发}$ 个请求进行预热，执行 3 轮正式测试。

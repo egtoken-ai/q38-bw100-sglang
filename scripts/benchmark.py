@@ -264,7 +264,8 @@ def aggregate(args, measured):
         "tpot_p50_ms": distribution([item["tpot_ms"]["p50"] for item in valid]),
         "tpot_p95_ms": distribution([item["tpot_ms"]["p95"] for item in valid]),
         "rounds": measured,
-        "method": "fixed random token IDs; two warmup waves; three measured rounds",
+        "method": "fixed random token IDs; %d warmup waves; %d measured rounds"
+                  % (args.warmup_rounds, args.measure_rounds),
     }
     atomic_json(os.path.join(args.output_dir, "summary.json"), result)
     atomic_json(os.path.join(args.output_dir, "progress.json"), {

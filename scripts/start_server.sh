@@ -17,7 +17,7 @@ export HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-"0,1"}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 export HSA_FORCE_FINE_GRAIN_PCIE=1
 export SGLANG_ROCM_USE_AITER_MOE=false
-export SGLANG_KV_LAYOUT_HCU_FA=false
+export SGLANG_KV_LAYOUT_HCU_FA=${SGLANG_KV_LAYOUT_HCU_FA:-false}
 
 # 服务配置参数
 MODEL_PATH=${MODEL_PATH:-"/model"}
@@ -35,6 +35,7 @@ CHUNKED_PREFILL_SIZE=${CHUNKED_PREFILL_SIZE:-8192}
 MAX_PREFILL_TOKENS=${MAX_PREFILL_TOKENS:-16384}
 PAGE_SIZE=${PAGE_SIZE:-64}
 CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-128}
+ATTENTION_BACKEND=${ATTENTION_BACKEND:-triton}
 
 LOG_FILE="${LOG_DIR}/server.log"
 
@@ -75,7 +76,7 @@ LAUNCH_CMD=(
   --chunked-prefill-size "${CHUNKED_PREFILL_SIZE}"
   --max-prefill-tokens "${MAX_PREFILL_TOKENS}"
   --disable-radix-cache
-  --attention-backend triton
+  --attention-backend "${ATTENTION_BACKEND}"
   --page-size "${PAGE_SIZE}"
   --mamba-scheduler-strategy no_buffer
   --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}"
@@ -92,14 +93,14 @@ if [ "${RUN_IN_BACKGROUND}" = true ]; then
   echo "等待服务就绪 (轮询 http://127.0.0.1:${PORT}/health)..."
   MAX_RETRIES=120
   COUNT=0
-  until curl -s "http://127.0.0.1:${PORT}/health" > /dev/null 2>&1 || [ ${COUNT} -eq ${MAX_RETRIES} ]; do
+  until curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/health" > /dev/null 2>&1 || [ ${COUNT} -eq ${MAX_RETRIES} ]; do
     sleep 3
     COUNT=$((COUNT + 1))
     echo -n "."
   done
   echo ""
 
-  if curl -s "http://127.0.0.1:${PORT}/health" > /dev/null 2>&1; then
+  if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/health" > /dev/null 2>&1; then
     echo "SGLang 推理服务已就绪！"
   else
     echo "警告: 等待超时，服务可能仍在初始化或发生错误，请查看日志: ${LOG_FILE}"
