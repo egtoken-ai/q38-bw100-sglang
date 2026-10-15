@@ -151,3 +151,13 @@ Docker环境短暂不可用导致有界Triton GEMM父流程中断；恢复后镜
 - GDN CPU元数据候选参照官方vLLM已合并#38361，提前构造chunk索引/offset和initial-state mask，避免旧GPU长度转CPU及逐层重复构造；官方记录本身没有证明TTFT改善，因此本项目独立验证。
 
 整体Goal仍未达到每个case≥20%的要求；恢复前7.80%/34.74%只作为历史结果保留。
+
+
+## 直接KV打包与CPU元数据组合模型
+
+| 固定case | 安擎基线 TTFT(s) | 优化 TTFT(s) | TTFT提升 | 优化TPS | 优化TPOT(ms/token) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 4K/1K C64 | 17.762641 | 16.179167 | 8.91% | 691.267 | 76.704 |
+| 64K/1K C1 | 15.901140 | 10.380501 | 34.72% | 25.618 | 28.925 |
+
+结果`result/quick/ttft-metadata-pack/20261015-173302-OByAtv/`，镜像`sglang-bw100:ttft-metadata-pack-issue3`。CPU metadata日志实际命中；K/V及metadata局部逐值检查均通过。6项输出回归与上一GDN32K父候选相同，但与原生的完整精度差异尚需实测任务评估。当前短档仍不达标，不将此前原生随机token数值差异掩盖为精度通过。
