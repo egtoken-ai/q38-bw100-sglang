@@ -96,3 +96,14 @@ CUDA 专用实现、其他 GPU 测量不能直接视为 BW100 收益。
 BW100上长度[63,129]、[4096]、[4096,4096]、[8192]的投影拆分、gating、两种归一化顺序、causal conv输出与最终状态检查通过；归一化输出最大绝对差为0。8192-token准备阶段约0.762ms→0.299ms。此计时不包含完整GDN或模型，不能换算为TTFT已达标。
 
 RCCL显式Ring/Simple和默认几乎一致，Tree/Simple更慢：8192×5120 BF16 all-reduce分别1.828、1.829、1.978ms；全部精确求和检查通过。保持默认通信参数。注意profiler的AllGather命名kernel主要属于all_reduce实现，不能据kernel名字认定模型做了大规模logits gather或INT8量化通信。
+
+
+## 后续筛选的保留与拒绝
+
+- INT8 ASM 实际入口对 M8192 的4种投影形状、11个vendor合法mode逐一隔离验证，共44项数值检查通过；最优mode8相对当前默认约-0.1%至+1.3%，不足以证明收益，不安装替换配置。
+- SiLU+INT8多调用/graph复测：8192 tokens约0.7191→0.7159ms，低于1%；GemmaNorm+INT8约0.7500→0.7705ms且量化不一致，均不启用。
+- QuickReduce INT8采用原生BF16、关闭FP16转换，目标三档全部更慢；8192 tokens RCCL1.8329ms、Quick INT8 2.0440ms，相对L2误差约0.00914。拒绝该有损候选，不进入模型。
+- GDN post-conv prepare融合在6种布局/长度上通过检查；token-major8192阶段0.3751→0.1469ms，Q/K最大绝对差0.001953125，V/g/beta逐值一致，小序列chunk输出最大绝对差0.00012207、state差0。候选采用4warps，补丁位于 `patch/ttft_gdn_prepare/`。
+- 更新后的views微测确认真实GPU conv返回QKV两臂stride均(5120,1)，未产生布局退化；8192 tokens含split/conv/gating/norm约1.292→0.847ms，仍不包含完整recurrence。
+
+真实模型组合候选 `sglang-bw100:ttft-gdn-prepare-w4-issue3` 正在固定套件验证；原生GEMM/RCCL保留，仅叠加packed、GDN views/prepare及32K服务分块。原始记录仍在 `result/ttft/issue3-attention/` 和 `result/quick/`，未纳入Git。

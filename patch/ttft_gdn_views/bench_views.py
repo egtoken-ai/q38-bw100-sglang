@@ -82,7 +82,53 @@ def main():
                                   eps=1e-6, is_rms_norm=True)
         base_ms = triton.testing.do_bench(lambda: run(legacy), warmup=100, rep=300)
         view_ms = triton.testing.do_bench(lambda: run(views), warmup=100, rep=300)
+
+        # empty_like can densify a view with holes. Record the actual device
+        # output layout rather than infer it from input contiguity alone.
+        layout = dict(
+            baseline_conv_input_stride=list(old[0].T.stride()),
+            candidate_conv_input_stride=list(new[0].T.stride()),
+            baseline_conv_output_stride=list(conv_old.stride()),
+            candidate_conv_output_stride=list(conv_new.stride()),
+            baseline_backend_qkv_stride=list(conv_old.T.stride()),
+            candidate_backend_qkv_stride=list(conv_new.T.stride()),
+            baseline_backend_qkv_contiguous=conv_old.T.is_contiguous(),
+            candidate_backend_qkv_contiguous=conv_new.T.is_contiguous(),
+            baseline_q_stride=list(conv_old.T[:, :1024].view(1, tokens, 8, 128).stride()),
+            candidate_q_stride=list(conv_new.T[:, :1024].view(1, tokens, 8, 128).stride()),
+        )
+        timing_common = dict(common, validate_data=False)
+
+        def run_conv(projected, state):
+            # Same state reset/launch in both arms; includes reset cost.
+            state.copy_(initial)
+            return causal_conv1d_fn(projected.T, conv_states=state, **timing_common)
+
+        def run_segment(split, state):
+            projected, z, b, a = split(qkvz, ba)
+            conv_out = run_conv(projected, state)
+            g, beta = fused_gdn_gating(alo, a, b, dt)
+            # x stands in for the recurrence output shared by both arms. This
+            # segment intentionally excludes recurrence and its QKV preparation.
+            norm_out = rms_norm_gated(x=x, weight=weight, bias=None, z=z,
+                                     eps=1e-6, is_rms_norm=True)
+            return conv_out, g, beta, norm_out
+
+        old_conv_ms = triton.testing.do_bench(
+            lambda: run_conv(old[0], state_old), warmup=100, rep=300)
+        new_conv_ms = triton.testing.do_bench(
+            lambda: run_conv(new[0], state_new), warmup=100, rep=300)
+        old_segment_ms = triton.testing.do_bench(
+            lambda: run_segment(legacy, state_old), warmup=100, rep=300)
+        new_segment_ms = triton.testing.do_bench(
+            lambda: run_segment(views, state_new), warmup=100, rep=300)
         item = dict(lengths=lengths, dtype='bfloat16', all_checks_pass=True,
+                    layout=layout,
+                    baseline_conv_with_state_reset_ms=old_conv_ms,
+                    candidate_conv_with_state_reset_ms=new_conv_ms,
+                    baseline_split_conv_gate_norm_ms=old_segment_ms,
+                    candidate_split_conv_gate_norm_ms=new_segment_ms,
+                    segment_excludes='recurrence and post-conv QKV preparation',
                     norm_max_abs=errors, baseline_ms=base_ms, views_ms=view_ms,
                     baseline_projection_stride=list(old[0].stride()),
                     candidate_projection_stride=list(new[0].stride()))

@@ -75,3 +75,66 @@ python3 scripts/check_ttft_teacher_forcing.py \
 两次均输入相同随机 prompt 和原生 16-token continuation，通过 `/generate` 的 input logprobs 比较相同历史条件下的分数，避免 greedy 分叉之后比较不同历史。工具请求 `logprob_start_len=prompt_length-1`，严格校验返回 17 项、首项 None、完整 token IDs、prompt 长度，再取后 16 项。该偏移已对照镜像 `scheduler_output_processor_mixin.py:720/732` 核查。结果保存每 token 差、最大绝对差、平均绝对差和平均有符号差，不设置伪精度通过阈值。
 
 注意 teacher forcing 会让 continuation 作为 prefill 处理，不能直接与旧 greedy decode logprobs 相减并称作优化误差。因此原生和候选都要用同工具测量。工具已通过 dry-run、离线错位拒绝和差值统计检查；本 agent 未向服务发起推理请求。完整任务精度仍需独立真实数据评测。
+
+## 补充核查：Dense Qwen27B sequence-parallel norm 未采用
+
+LoopX goal `q38-bw100-gdn-fusion` / Issue #3，2026-10-15。本项仅做源码核查和接线设计，没有实现或启用模型补丁，没有执行 GPU 实验。
+
+结论：镜像没有可直接给当前 dense Qwen3.8-27B、HCU TP2 安全启用的现成开关。BF16 reduce-scatter → 局部 GemmaRMSNorm → BF16 all-gather 可以单独实现，不改变 TP 权重和 GEMM 的 token 输入；但它不减少 ring all-reduce 的理论通信字节，只把 norm 工作减半。按已有 4K C1 profiler 的 GPU 事件和估算，理想收益约 1.89%，且未计额外 launch/分配成本，不能单独支撑短 case 提升 20%。
+
+## 已有代码及不能直接启用的原因
+
+源码路径相对 `/usr/local/lib/python3.10/dist-packages/sglang/srt`：
+
+| 入口 | 实际条件 | 当前模型结果 |
+| --- | --- | --- |
+| `server_args.py:7124 --enable-attn-tp-input-scattered` | `layers/communicator.py:268 AttnTpContext.init_context` 要求 CUDA 或 NPU、`q_lora_rank != None`、非 NSA、TP>1、非 DP attention、MoE a2a none、非 dense fully-DP、禁用 piecewise graph、非 EAGLE3 | HCU 不满足平台 guard；Qwen3_5 也没有 MLA q_lora_rank。模型未调用 `init_context` 或 `maybe_input_scattered` |
+| `AttentionInputs.fetch_hidden_states/fetch_qkv_latent` | 为上述 MLA scattered 输入在 consumer 之前 all-gather | Qwen3_5 的 Full Attention 直接 `qkv_proj(hidden_states)`，GDN 直接 `_forward_input_proj`，不经过此 consumer；硬开 context 会使 token 维与 positions/cache metadata 不一致 |
+| 两类 Qwen3_5 decoder 的 `LayerCommunicator(...allow_reduce_scatter=True)` | 只是能力声明，实际由 `should_use_reduce_scatter` 选择；dense scatter mode 默认 FULL，DP1 时 FULL 与 TP_ATTN_FULL group size 相同 | 当前不会自动进入所需 sequence-parallel norm |
+| `moe_dense_tp_size=1` | `enable_moe_dense_fully_dp` 使 dense mode SCATTERED | 不能把它当本模型开关；Qwen dense MLP 的 Column/RowParallelLinear 仍按 TP 切权重，需另行处理权重/布局，不满足本次“不复制权重”的边界 |
+| `--minimax-opt` | 明确 MiniMax M2 专用 sequence-parallel prefill | 不用于 Qwen；此前 packed attention 已用独立窄 guard 接线 |
+| `enable_sp` / `enable_mlp_tp_scatter` | 镜像 `server_args.py` 未发现这些字段 | 不存在可直接启用的相应开关 |
+
+已有 `CommunicateWithAllReduceAndLayerNormFn._tp_all_reduce_with_scattered_residual` 也不等于这里的方案：它把局部 residual 加入全 token partial buffer，再 all-reduce 得到 full residual，随后做 full norm（`:1186–1190`），不是 RS→半 token norm→AG。
+
+## 性能上界
+
+已有 `result/ttft/issue3-profile/4k-c1/kernel-summary-tp0.json`：
+
+- GPU 事件耗时和 607.31 ms。
+- Gemma `fused_add_rms_kernel_opt` 22.96 ms，占 3.78%。即使完全线性减半，最多省 11.48 ms，约事件和 1.89%。这只是估算，没有扣除额外通信调用、分配、局部 slice/copy 成本。
+- RCCL 事件约 20.5%，不能算作该方案可消除的时间。Ring AR 可看作 RS+AG；TP2、full tensor 大小 S 时，每 rank 的理论发送量都是约 S。独立调用 RS/AG 还可能比库内 AR 更慢。
+- profiler 的事件和含重叠，可能含额外流水 decode；4K C1 也不是正式 C64。因此上述百分比不是 TTFT 可证明上界，只用于判断候选优先级，正式收益必须测固定 case。
+
+INT8 AG 可以进一步减少 norm 后传输量，但涉及量化 consumer 接线。GDN 的 ba 是未量化 BF16 consumer，不能直接用 INT8 输入替代，也不能为它再 AG 整个 BF16 hidden 而隐瞒额外通信。保持精度需要局部 ba 投影及小输出 AG 等额外设计。该方案不属于当前最小补丁。已有有损 QuickReduce INT8 实验也不能用作替代。
+
+## 最小模型接线设计
+
+只针对 `Qwen3_5LinearDecoderLayer` 与 `Qwen3_5AttentionDecoderLayer` 的 communicator 实例采用专用 subclass/wrapper，其他模型保持原逻辑。不要全局篡改 `AttnTpContext` 或 generic LayerCommunicator。
+
+一个 prefill step 内保持以下不变量：
+
+- 每个 ColumnParallel GEMM、attention、GDN 都仍接收 full-token hidden `[T,5120]`。
+- RowParallel 的 output 为各 rank 的 full-token partial `[T,5120]`。
+- residual 仅存本 rank 固定连续 token 段 `[T/2,5120]`，按 TP rank 顺序。不要按 sequence 边界分配 shard；norm 是逐 token 操作，token shard 可以穿过 sequence 边界，attention/GDN 在 AG 后仍使用原 metadata。
+- 全程 BF16 hidden/residual，Gemma norm 保持 vendor 原算子；不改量化权重、输入量化舍入或 accumulation 规则。
+
+接线顺序：
+
+1. 首层 `prepare_attn`：embedding 已完成 all-reduce，是 full replicated hidden。只取本 rank token slice，保留其 residual，然后局部无残差 Gemma norm、AG normalized hidden。**禁止对 embedding 再 RS，否则会把相同值累加 TP 次。**
+2. 所有层 `prepare_mlp`：对 attention/GDN `reduce_results=False` 的 partial output 做 BF16 RS；与局部 residual 调用原 Gemma residual norm；AG normalized hidden 给原 MLP。保留更新后的局部 residual。
+3. MLP 调用 `use_reduce_scatter=True`，使现有 `Qwen2MoeMLP.forward` 通过 `down_proj(...skip_all_reduce=True)` 返回 partial output。这个 flag 本身并不执行 RS。
+4. 非末层 `postprocess_layer` 保留 partial hidden/full T 与局部 residual，交给下一层 `prepare_attn` 做 RS→local norm→AG。必须禁止与旧 allreduce-fusion 标记叠加。
+5. 末层恢复原模型 final norm 需要的 full hidden/full residual。最保守做法是对末层 MLP partial output 做原 BF16 AR，并把局部 residual AG 到 full，随后保留 `Qwen3_5Model.forward` 现有最终 Gemma norm。这仅在末层多出一次 residual AG；不可每层都 AG residual，否则持续增加通信量。
+
+初始化 guard 应精确检查 dense `qwen3_5_text`、hidden5120、64层、TP2、DP1、PP1、BF16、GemmaRMSNorm、当前 W8A8 checkpoint、两类 decoder、MLP down_proj reduce_results=True、attention out_proj reduce_results=False。模型层面一次决定启用，不能运行到中间层才因 shape 不符回退，因为 residual 已经是 shard。
+
+每个 forward 的 guard 需基于所有层共享的信息：普通 non-spec extend、无 TBO、无 CUDA graph capture、无 aux/last-layer capture、无 deepstack/multimodal additions、总 T>阈值且可被2整除。不满足时整个 step 使用原路径；decode 必须回退。初版建议不支持 tail odd T，不做隐藏 token padding。
+
+## 验证要求
+
+先两卡微测完整 AR+norm 与 RS+local norm+AG，在同样 full partial inputs、复制 residual 上比较输出。RS 与 AR 的 BF16 规约顺序可能不同，数学等价不代表位相同；记录 normalized hidden 和 residual 的误差，不只比较形状。多层 synthetic 链必须测试初层、非末层、末层恢复，以及不整除 token/decode 的整体回退。
+
+若微测没有明确优势，不制作新的模型镜像。若有优势再接模型，验证全部层实际路径、相同历史 logprobs、真实任务精度，并对固定两个 case 做 matched A/B。由于预计只消除少量 norm 重复计算，该候选优先级低于已经找到的更大 GDN/Attention/调度瓶颈，不能借改并发、输出长度或模型精度放大表面收益。
+
+最终取舍：主任务决定不实现 BF16 sequence-parallel norm。现有配置不能安全启用，预计收益小、涉及跨层 residual 语义，当前优先级不足；这不是证明其在 BW100 一定无收益。

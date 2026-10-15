@@ -1,0 +1,91 @@
+--- a/gdn_backend.py
++++ b/gdn_backend.py
+@@ -17,6 +17,7 @@
+ import torch
+ 
+ from sglang.srt.layers.attention.fla.fused_gdn_gating import fused_gdn_gating
++from sglang.srt.layers.attention.fla.gdn_prefill_prepare import fused_gdn_prefill_prepare
+ from sglang.srt.layers.attention.hybrid_linear_attn_backend import MambaAttnBackendBase
+ from sglang.srt.layers.attention.linear.kernels.gdn_triton import TritonGDNKernel
+ from sglang.srt.layers.attention.linear.utils import (
+@@ -471,16 +472,33 @@
+                     seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
+                 ).transpose(0, 1)[:seq_len]
+ 
+-        query, key, value = torch.split(
+-            mixed_qkv,
+-            [layer.q_dim, layer.k_dim, layer.v_dim],
+-            dim=-1,
+-        )
+-
+-        actual_seq_len = query.shape[0]
+-        query = query.view(1, actual_seq_len, layer.num_q_heads, layer.head_q_dim)
+-        key = key.view(1, actual_seq_len, layer.num_k_heads, layer.head_k_dim)
+-        value = value.view(1, actual_seq_len, layer.num_v_heads, layer.head_v_dim)
++        use_fused_prepare = (
++            get_bool_env_var("SGLANG_QWEN27B_GDN_FUSED_PREPARE")
++            and _is_hcu
++            and not is_target_verify
++            and forward_batch.forward_mode.is_extend_without_speculative()
++            and isinstance(self.kernel_dispatcher.extend_kernel, TritonGDNKernel)
++            and layer.num_q_heads == layer.num_k_heads == 8
++            and layer.num_v_heads == 24
++            and layer.head_q_dim == layer.head_k_dim == layer.head_v_dim == 128
++            and mixed_qkv.dtype == a.dtype == b.dtype == torch.bfloat16
++        )
++        if use_fused_prepare:
++            query, key, value, g, beta = fused_gdn_prefill_prepare(
++                mixed_qkv, layer.A_log, a, b, layer.dt_bias,
++                layer.num_k_heads, layer.num_v_heads,
++                layer.head_k_dim, layer.head_v_dim,
++            )
++        else:
++            query, key, value = torch.split(
++                mixed_qkv,
++                [layer.q_dim, layer.k_dim, layer.v_dim],
++                dim=-1,
++            )
++            actual_seq_len = query.shape[0]
++            query = query.view(1, actual_seq_len, layer.num_q_heads, layer.head_q_dim)
++            key = key.view(1, actual_seq_len, layer.num_k_heads, layer.head_k_dim)
++            value = value.view(1, actual_seq_len, layer.num_v_heads, layer.head_v_dim)
+ 
+         if is_target_verify:
+             core_attn_out = self.kernel_dispatcher.target_verify(
+@@ -500,7 +518,8 @@
+                 retrieve_parent_token=retrieve_parent_token,
+             )
+         else:
+-            g, beta = fused_gdn_gating(layer.A_log, a, b, layer.dt_bias)
++            if not use_fused_prepare:
++                g, beta = fused_gdn_gating(layer.A_log, a, b, layer.dt_bias)
+             core_attn_out, last_recurrent_state, h = self.kernel_dispatcher.extend(
+                 q=query,
+                 k=key,
+@@ -510,6 +529,7 @@
+                 ssm_states=ssm_states,
+                 cache_indices=cache_indices,
+                 query_start_loc=query_start_loc,
++                use_qk_l2norm_in_kernel=not use_fused_prepare,
+             )
+ 
+             if (is_npu() or is_cpu()) and last_recurrent_state is not None:
+--- a/gdn_triton.py
++++ b/gdn_triton.py
+@@ -149,6 +149,7 @@
+         ssm_states: torch.Tensor,
+         cache_indices: torch.Tensor,
+         query_start_loc: torch.Tensor,
++        use_qk_l2norm_in_kernel: bool = True,
+         **kwargs,
+     ) -> tuple:
+         recurrent_state = ssm_states
+@@ -165,7 +166,7 @@
+             initial_state=recurrent_state,
+             cu_seqlens=query_start_loc,
+             head_first=False,
+-            use_qk_l2norm_in_kernel=True,
++            use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
+             **recurrent_state_indices_args,
+         )
+ 
