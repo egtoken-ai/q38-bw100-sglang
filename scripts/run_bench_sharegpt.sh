@@ -25,9 +25,9 @@ fi
 
 mkdir -p "${RESULT_BASE_DIR}"
 
-CONCURRENCIES=(1 4 16 32 64)
-NUM_PROMPTS=1000
-ROUNDS=3
+CONCURRENCIES=(${CONCURRENCIES:-1 4 16 32 64})
+NUM_PROMPTS=${NUM_PROMPTS:-1000}
+ROUNDS=${ROUNDS:-3}
 
 echo "================================================================"
 echo "开始 ShareGPT 真实数据集基准测试"
