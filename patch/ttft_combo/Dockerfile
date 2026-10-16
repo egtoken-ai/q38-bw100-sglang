@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=sglang-bw100:gdn-kkt-solve-issue1
+ARG BASE_IMAGE=harbor.sourcefind.cn:5443/dcu/admin/base/sglang:0.5.12-ubuntu22.04-dtk2604-py3.10
 FROM ${BASE_IMAGE}
 
 # Copy the consolidated, validated TTFT combo patches into SGLang
