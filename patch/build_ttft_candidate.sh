@@ -15,7 +15,7 @@ usage() {
 Usage: bash patch/build_ttft_candidate.sh [options]
   --dry-run                    Validate local source; print build commands only
   --from issue1|native         Start with Issue 1 image, or build it (default issue1)
-  --target current-gemm|prefill-release|qk-gate|postops   Last layer (default prefill-release)
+  --target current-gemm|prefill-release|qk-gate|postops|combo   Last layer (default prefill-release)
   --image-prefix NAME          Output repository (default sglang-bw100)
   --tag-suffix TEXT            Issue 3 tag suffix (default issue3)
   --issue1-image IMAGE         Issue 1 input/output tag (default PREFIX:gdn-kkt-solve-issue1)
@@ -44,7 +44,7 @@ while (($#)); do
   esac
 done
 [[ "$start_from" == issue1 || "$start_from" == native ]] || { printf 'Invalid --from\n' >&2; exit 2; }
-[[ "$target" == current-gemm || "$target" == prefill-release || "$target" == qk-gate || "$target" == postops ]] || { printf 'Invalid --target\n' >&2; exit 2; }
+[[ "$target" == current-gemm || "$target" == prefill-release || "$target" == qk-gate || "$target" == postops || "$target" == combo ]] || { printf 'Invalid --target\n' >&2; exit 2; }
 [[ -n "$image_prefix" && -n "$tag_suffix" ]] || { printf 'Empty image prefix/suffix\n' >&2; exit 2; }
 issue1_image=${issue1_image:-"${image_prefix}:gdn-kkt-solve-issue1"}
 
@@ -109,12 +109,12 @@ for stage in fa packed gdn-views gdn-prepare-w4 kv-pack metadata-pack mlp-pipeli
   esac
   parent=$tag
 done
-if [[ "$target" == prefill-release || "$target" == qk-gate || "$target" == postops ]]; then
+if [[ "$target" == prefill-release || "$target" == qk-gate || "$target" == postops || "$target" == combo ]]; then
   tag=$(image prefill-release)
   build_layer "$parent" "$tag" ttft_prefill_release
   parent=$tag
 fi
-if [[ "$target" == qk-gate || "$target" == postops ]]; then
+if [[ "$target" == qk-gate || "$target" == postops || "$target" == combo ]]; then
   tag=$(image current-parts)
   build_layer "$parent" "$tag" ttft_mlp_pipeline/current_stream_parts
   parent=$tag
@@ -122,7 +122,7 @@ if [[ "$target" == qk-gate || "$target" == postops ]]; then
   build_layer "$parent" "$tag" ttft_qk_norm_gate
   parent=$tag
 fi
-if [[ "$target" == postops ]]; then
+if [[ "$target" == postops || "$target" == combo ]]; then
   tag=$(image numa4)
   build_layer "$parent" "$tag" ttft_numa
   parent=$tag
@@ -131,6 +131,20 @@ if [[ "$target" == postops ]]; then
   parent=$tag
   tag=$(image postops)
   build_layer "$parent" "$tag" ttft_gemm_dispatch_64k/install_extension
+  parent=$tag
+fi
+if [[ "$target" == combo ]]; then
+  tag=$(image catfree)
+  build_layer "$parent" "$tag" ttft_mlp_catfree
+  parent=$tag
+  tag=$(image catfree-conv1d)
+  build_layer "$parent" "$tag" ttft_conv1d_tune
+  parent=$tag
+  tag=$(image catfree-conv1d-mrope)
+  build_layer "$parent" "$tag" ttft_mrope
+  parent=$tag
+  tag=$(image combo)
+  build_layer "$parent" "$tag" ttft_rccl_channels
   parent=$tag
 fi
 printf 'Final candidate: %s\n' "$parent" >&2

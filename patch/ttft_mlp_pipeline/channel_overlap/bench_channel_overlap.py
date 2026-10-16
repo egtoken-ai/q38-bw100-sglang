@@ -1,4 +1,4 @@
-"""Installed current-stream M65536 parts8 boundary: default/4/8 RCCL channels.
+"""Installed current-stream M65536 parts8 boundary: default or fixed RCCL channel counts.
 
 Constructs actual Qwen3_5 dense decoder classes and their actual W8A8 modules,
 using randomized weight shards. Does not run attention or load the checkpoint.
@@ -25,9 +25,12 @@ def check(a,b,exact=False):
     return result
 
 
+CHANNEL_MODES=('default','2','4','6','8','12','16','24','32')
+
+
 def checked_channel_environment(mode):
-    if mode not in ('default','4','8'):
-        raise ValueError('Only default, 4 or 8 channels are permitted')
+    if mode not in CHANNEL_MODES:
+        raise ValueError(f'Only {CHANNEL_MODES} channels are permitted')
     expected=None if mode=='default' else mode
     keys=('NCCL_MIN_NCHANNELS','NCCL_MAX_NCHANNELS')
     if any(os.environ.get(key)!=expected for key in keys):
@@ -48,7 +51,7 @@ def main():
     p.add_argument('--output',required=True)
     p.add_argument('--model',default='/model')
     p.add_argument('--tokens',type=int,default=65536,choices=[65536])
-    p.add_argument('--channels',required=True,choices=['default','4','8'])
+    p.add_argument('--channels',required=True,choices=list(CHANNEL_MODES))
     p.add_argument('--iterations',type=int,default=3,choices=[3])
     p.add_argument('--repeats',type=int,default=5,choices=[5])
     args=p.parse_args()

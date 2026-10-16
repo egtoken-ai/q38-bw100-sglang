@@ -1,6 +1,6 @@
 # 原生 OpenCompass API 客户端：固定 GSM8K 64 样本 A/B
 
-评测环境已准备在 BW100 的 `/bench/.venv-accuracy`，复用镜像系统 torch/torchvision/torchaudio/triton，未改 GPU 栈或服务。已通过 CPU 源码、官方评分器、原生 reader、CLI 和配置检查；**尚未由本分工发送模型请求或执行模型评测**。64 题子集只能作为相同样本回归，不能替代 GSM8K 1319 题或完整四项精度验收。
+评测环境已准备在 BW100 的 `/bench/.venv-accuracy`，复用镜像系统 torch/torchvision/torchaudio/triton，未改 GPU 栈或服务。已通过 CPU 源码、官方评分器、原生 reader、CLI 和配置检查；随后经明确授权完成一次 optimized GSM8K64 原生模型评测，官方 61/64（95.3125%），详见下方。64 题子集只能作为相同样本回归，不能替代 GSM8K 1319 题或完整四项精度验收。
 
 ## 现成运行命令（由主 agent 调度）
 
@@ -60,3 +60,9 @@ taskset -c 0-3 nice -n 19 .venv-accuracy/bin/python \
 ```
 
 模型运行后，结果位于各自 `opencompass/gsm8k/native/predictions/q38/gsm8k.json` 与 `results/q38/gsm8k.json`。必须核对双方完整 64 题、错误/空响应及逐题对应。现有 `audit_oc` 强制 1319 题，因此子集结果与全量审计隔离，不把子集分数记作完整准入通过。
+
+## 已执行的优化服务子集结果
+
+2026-10-15 对 `sglang-bw100:ttft-postops-issue3` 执行一次原生 CLI，19:35:28–19:36:50（82 秒），退出 0；64 条完整预测，官方正确 61/64，accuracy 95.3125%，错误原始索引 12/37/46。空输出和 API 失败标记均为 0。索引 12/37 的原始输出经同一 tokenizer 重编码达到512 token，存在触顶截断迹象；native artifact 不保留 finish_reason/usage，不能把“无明确 finish_reason”写成“无截断”。没有提高上限或重跑。原生服务 A/B 待主 agent 调度，64子集不是完整验收。
+
+完整证据保存在 `result/accuracy-native/gsm8k64-optimized/`，摘要 `execution-evidence/summary.md`、官方 predictions/results、部署和始末日志均已同步本地。环境准备阶段的 `model_requests_sent=false` 是19:27准备完成时的历史边界，不适用于本次另行授权的模型评测。

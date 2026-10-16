@@ -66,3 +66,15 @@ bash patch/build_ttft_candidate.sh --from native --target current-gemm \
 `--target postops` 继续在qk-gate之后构建numa4→fa-gate→postops。最后一层只增加已验证的 `(65536,5120,3072)` hipBLASLt形状，其他两个64K形状仍拒绝。FA门控保留原sigmoid的BF16中间舍入。启动时使用 `/opt/ttft-numa/start_server.sh --daemon`，该脚本硬性限定GPU4/5、TP2和 `--numa-node 4 4`，镜像设置 `SGLANG_NUMA_BIND_V2=0`。64K/8、mem_fraction0.80等环境需显式设置，保持与上轮对照相同。
 
 NUMA独立固定套件268秒：TTFT提升19.13%/35.22%，正式及预热130个输出hash全与qk64父候选相同；单轮约0.15%的额外短档差异不足以证明稳定收益。父配置和结果均保留，Goal未完成。两rank真实CPU亲和 `64-79,192-207`、内存policy `prefer:4` 已由 `ttft_numa/capture_binding.py`验证；postops组合268秒固定suite为19.47%/35.39%，130输出与NUMA父候选相同，仍未完成逐case20%及重复正确性验收。
+
+## 组合优化候选与重复 A/B 验证
+
+新增 `--target combo`：在 postops 基础之上，依次构建以下四层优化层：
+1. `ttft_mlp_catfree`：RS + 原地 AG 消除 8 子批 MLP pipeline 尾部 `torch.cat` 内存拼接开销，单层 60.11ms -> 59.50ms。
+2. `ttft_conv1d_tune`：causal_conv1d launch 调优（BLOCK_M=64, BLOCK_N=512），单层 4.43ms -> 3.81ms。
+3. `ttft_mrope`：token-tiled mRoPE 访存重排与向量化加载，单层 4.71ms -> 0.38ms。
+4. `ttft_rccl_channels`：固定 `NCCL_MIN_NCHANNELS=8 NCCL_MAX_NCHANNELS=8`，降低 GEMM 与 RCCL 并行时的 CU 争用。
+
+最终组合镜像 tag 为 `sglang-bw100:ttft-combo-issue3`（ID: `a875df666a97`）。
+通过 `scripts/run_ttft_ab_repeat.sh` 在 GPU 4/5 进行 3 轮严格交替 A/B 压测（4K/1K C64 与 64K/1K C1），每轮每档 TTFT P50 相对原生安擎基线提升均稳定超过 20%（4K 提升 24.26%~24.45%，64K 提升 33.81%~33.86%），候选跨轮输出逐值一致性校验全部通过。
+

@@ -1,6 +1,6 @@
 # 原生 OpenCompass 64 样本 A/B：准备状态与实际证据
 
-**评测客户端已准备完成，尚未由本分工执行模型评测。** BW100 sleep 容器中的 `/bench/.venv-accuracy` 已安装固定源码的 OpenCompass 0.5.4 和兼容 CPU 依赖；官方评分器、原生 reader、CLI、两份配置及本地 tokenizer 检查通过。最终状态记录于 `result/ttft/accuracy-setup/preparation-status.json`：`READY_NATIVE_API_64_SUBSET`。准备结束时没有 pip/build 进程，没有模型请求或 GPU kernel 执行，系统 GPU 栈不变。
+**评测客户端已准备完成，随后经授权完成一次 optimized GSM8K64 评测：61/64，官方95.3125%。原生同样本A/B仍待调度。** BW100 sleep 容器中的 `/bench/.venv-accuracy` 已安装固定源码的 OpenCompass 0.5.4 和兼容 CPU 依赖；官方评分器、原生 reader、CLI、两份配置及本地 tokenizer 检查通过。最终状态记录于 `result/ttft/accuracy-setup/preparation-status.json`：`READY_NATIVE_API_64_SUBSET`。准备结束时没有 pip/build 进程，没有模型请求或 GPU kernel 执行，系统 GPU 栈不变。
 
 完整启动说明见 [ttft_accuracy_client/README.md](ttft_accuracy_client/README.md)。不要沿用早期失败的 git+file 或隔离 setup_requires 方案。
 
@@ -64,3 +64,7 @@ bash patch/ttft_accuracy_client/opencompass_api.sh \
 - [DatasetReader / load_partial_dataset](https://github.com/open-compass/opencompass/blob/1543bd270b6fbabb1a118307f78d4144e8296467/opencompass/openicl/icl_dataset_reader.py#L199)：原生确定范围。
 - [GSM8K 配置](https://github.com/open-compass/opencompass/blob/1543bd270b6fbabb1a118307f78d4144e8296467/opencompass/configs/datasets/gsm8k/gsm8k_gen_1d7fe4.py)：沿用 prompt、postprocess 和 evaluator。
 - [setup.py](https://github.com/open-compass/opencompass/blob/1543bd270b6fbabb1a118307f78d4144e8296467/setup.py)、[runtime 依赖](https://github.com/open-compass/opencompass/blob/1543bd270b6fbabb1a118307f78d4144e8296467/requirements/runtime.txt)：安装范围和依赖记录。
+
+## 后续实际模型运行
+
+经主 agent 单独授权，2026-10-15 19:35:28–19:36:50 对 postops 优化服务执行一次原生 CLI（82秒、退出0），官方61/64=95.3125%。全部64预测完整，空响应/API失败标记0；ID12/37输出恰达512 token，疑似触顶，API finish_reason未在原生产物中保留。错误ID为12/37/46。证据在 `result/accuracy-native/gsm8k64-optimized/execution-evidence/summary.md`。前文准备阶段的“无模型请求”只描述准备边界，模型运行是在其后另行获准进行。原生同口径与完整精度门槛尚未完成。
