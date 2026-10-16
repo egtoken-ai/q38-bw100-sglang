@@ -14,7 +14,7 @@
 | **算子融合与图折叠** | Attention 输出门控 Sigmoid 计算与注意力计算图折叠融合；BF16 QK Normalization 与门控特征向量提取融合同步执行 | `sglang/srt/models/qwen3_5.py` |
 | **一维因果卷积网格调优** | 调整 Causal Conv1d Triton Launch 调度网格尺寸为 `BLOCK_M=64, BLOCK_N=512`，充分打满海光 DCU 计算单元流处理器吞吐 | `sglang/srt/layers/attention/mamba/causal_conv1d_triton.py`<br>`sglang/srt/layers/attention/mamba/causal_conv1d_ttft.py` |
 | **分块向量化位置编码** | Token-Tiled 分块向量化加载机制，消除旋转位置编码跨维度离散步长加载，提升长文本与多模态下连续访存效率 | `sglang/srt/layers/rotary_embedding/triton_kernels.py`<br>`sglang/srt/layers/rotary_embedding/mrope_tiled.py` |
-| **硬件拓扑与服务调度协同** | 双卡硬件硬绑定至本节点 NUMA node 4 内存与 CPU；限制 NCCL 通道数为 8 避免与 GEMM 算力争用；调优分块预填参数为 `CHUNKED_PREFILL_SIZE=16384` 与 `MAX_PREFILL_TOKENS=32768` | `patch/start_server.sh`<br>`scripts/start_server.sh` |
+| **硬件拓扑与服务调度协同** | 双卡硬件硬绑定至本节点 NUMA node 4 内存与 CPU；限制 NCCL 通道数为 8 避免与 GEMM 算力争用；调优分块预填参数为 `CHUNKED_PREFILL_SIZE=8192` 与 `MAX_PREFILL_TOKENS=16384` | `patch/start_server.sh`<br>`scripts/start_server.sh` |
 
 精度准入验证见 [OpenCompass / VLMEvalKit 使用说明](docs/accuracy.md)：支持 GSM8K、LiveCodeBench v6（175 题）、RealWorldQA 和 MathVision testmini（304 题），包含自动下载、缓存复用、逐题续跑及 Markdown/CSV/JSON 报告。入口：`bash scripts/run_accuracy.sh run`，需先按说明安装独立评测环境并启动模型服务。
 
