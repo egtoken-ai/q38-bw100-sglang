@@ -44,6 +44,6 @@ run() {
 }
 
 echo ">>> Building consolidated release candidate image directly from native base..."
-run docker build --build-arg "BASE_IMAGE=$native_image" -t "$final_image" -f "$patch_dir/ttft_combo/Dockerfile" "$patch_dir/ttft_combo"
+run docker build --build-arg "BASE_IMAGE=$native_image" -t "$final_image" -f "$patch_dir/Dockerfile" "$patch_dir"
 
 printf '\nFinal candidate successfully built: %s\n' "$final_image" >&2
