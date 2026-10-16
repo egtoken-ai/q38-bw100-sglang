@@ -1,5 +1,0 @@
-*
-!Dockerfile
-!start_server.original.sh
-!start_server.sh
-!check_startup.py

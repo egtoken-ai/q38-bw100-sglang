@@ -1,6 +1,0 @@
-ARG BASE_IMAGE=sglang-bw100:ttft-fa-issue3
-FROM ${BASE_IMAGE}
-COPY pack_paged_kv_to_varlen.py install_packed.py /opt/ttft-prefill/
-RUN python3 /opt/ttft-prefill/install_packed.py
-ENV SGLANG_QWEN27B_PACKED_PREFILL=true
-ENV PACK_PAGED_KV_TO_VARLEN=on
