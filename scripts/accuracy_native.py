@@ -174,6 +174,7 @@ def child_env(args, stage, key):
     env['TOKENIZERS_PARALLELISM'] = 'false'
     env['OPENAI_API_KEY'] = env.get('ACCURACY_JUDGE_API_KEY' if stage == 'eval' and key == 'mathvision'
                                     else 'ACCURACY_API_KEY', 'EMPTY')
+    env['VLLM_PLUGINS'] = 'none'
     # Do not inherit distributed model-server settings into the CPU client.
     for name in ('DATASET_SOURCE', 'LOCAL_LLM', 'RANK', 'WORLD_SIZE', 'LOCAL_RANK', 'LOCAL_WORLD_SIZE'):
         env.pop(name, None)
