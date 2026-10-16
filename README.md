@@ -2,6 +2,20 @@
 
 本项目面向社区 Qwen3.8 推理性能优化挑战赛（子赛道 B：SGLang），针对海光 BW100 双卡平台与 Qwen3.8-27B-Channel-INT8-w8a8 模型，提供完整的容器配置、推理服务启动脚本以及标准评测执行脚本。
 
+### 优化补丁明细表
+
+| 模块 | 优化内容 | 修改的底层文件 |
+| :--- | :--- | :--- |
+| **GDN 求解加速 (Issue 1)** | 移除 GDN 逆缓冲区冗余初始化，消除不必要的显存申请与内核启动延迟 | `sglang/srt/layers/attention/fla/chunk_fwd.py` |
+| **Cat-Free MLP 流水线** | 采用 Reduce-Scatter (RS) + 原地 All-Gather (AG) 8-Part 微流水线，重叠 GEMM 计算与通信，消除尾部 `torch.cat` 的显存重分配与内存拷贝开销 | `sglang/srt/layers/qwen27b_mlp_pipeline.py`<br>`sglang/srt/layers/qwen27b_mlp_probe.py` |
+| **hipBLASLt 矩阵乘派发** | 针对海光 BW100 DCU 矩阵核固化 10 形状 GEMM 派发白名单（覆盖 4K 常见维度及 64K 超长上下文），跳过动态核函数搜索 | `sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_w8a8_int8.py`<br>`sglang/srt/layers/quantization/compressed_tensors/schemes/q38_bw100_legacy_gemm_dispatch.py` |
+| **GDN 线性注意力加速** | 4-warp Triton 算子融合 GDN Prepare 投影，批元数据预计算，优化 Chunk 状态视图与 LayerNorm Gated 连续访存 | `sglang/srt/layers/attention/linear/gdn_backend.py`<br>`sglang/srt/layers/attention/linear/kernels/gdn_triton.py`<br>`sglang/srt/layers/attention/fla/chunk.py`<br>`sglang/srt/layers/attention/fla/chunk_delta_h.py`<br>`sglang/srt/layers/attention/fla/chunk_o.py`<br>`sglang/srt/layers/attention/fla/layernorm_gated.py` |
+| **Paged KV 打包重排** | Prefill 阶段针对变长序列对离散 Paged KV 缓存进行重排打包，消除注意力计算中的跨页碎片与访存气泡 | `sglang/srt/layers/attention/pack_paged_kv_to_varlen.py` |
+| **算子融合与图折叠** | Attention 输出门控 Sigmoid 计算与注意力计算图折叠融合；BF16 QK Normalization 与门控特征向量提取融合同步执行 | `sglang/srt/models/qwen3_5.py` |
+| **一维因果卷积网格调优** | 调整 Causal Conv1d Triton Launch 调度网格尺寸为 `BLOCK_M=64, BLOCK_N=512`，充分打满海光 DCU 计算单元流处理器吞吐 | `sglang/srt/layers/attention/mamba/causal_conv1d_triton.py`<br>`sglang/srt/layers/attention/mamba/causal_conv1d_ttft.py` |
+| **分块向量化位置编码** | Token-Tiled 分块向量化加载机制，消除旋转位置编码跨维度离散步长加载，提升长文本与多模态下连续访存效率 | `sglang/srt/layers/rotary_embedding/triton_kernels.py`<br>`sglang/srt/layers/rotary_embedding/mrope_tiled.py` |
+| **硬件拓扑与服务调度协同** | 双卡硬件硬绑定至本节点 NUMA node 4 内存与 CPU；限制 NCCL 通道数为 8 避免与 GEMM 算力争用；调优分块预填参数为 `CHUNKED_PREFILL_SIZE=16384` 与 `MAX_PREFILL_TOKENS=32768` | `patch/ttft_combo/start_server.sh`<br>`scripts/start_server.sh` |
+
 精度准入验证见 [OpenCompass / VLMEvalKit 使用说明](docs/accuracy.md)：支持 GSM8K、LiveCodeBench v6（175 题）、RealWorldQA 和 MathVision testmini（304 题），包含自动下载、缓存复用、逐题续跑及 Markdown/CSV/JSON 报告。入口：`bash scripts/run_accuracy.sh run`，需先按说明安装独立评测环境并启动模型服务。
 
 新增 **[原生配置＋命令版本](docs/accuracy-native.md)**：`bash scripts/run_accuracy_native.sh run`，真正调用 OpenCompass CLI 和 VLMEvalKit `run.py`，由框架执行推理、评分与续跑。MathVision 完整评分需配置独立 Judge API；原来的 Python API 版本仍保留。
@@ -243,38 +257,4 @@ python3 -u -m sglang.bench_serving \
 bash scripts/run.sh stop-server
 ```
 
----
-
-## 五、已采纳优化补丁清单 (Accepted Patches)
-
-本项目已对所有经过压测验证的有效优化进行统一收敛，核心优化模块整合至 `patch/ttft_combo` 统一优化包中。以下为当前被采纳并实际应用在最终生产候选镜像（`sglang-bw100:ttft-combo-issue3`）中的优化补丁清单：
-
-### 1. 术语与符号定义表
-
-| 符号 / 缩写 | 英文全称 | 对应配置 / 代码概念 | 说明与典型值 |
-| :--- | :--- | :--- | :--- |
-| **MLP** | Multi-Layer Perceptron | 多层感知机层 | 包含 Gate/Up/Down 投影的前馈网络 |
-| **RS** | Reduce-Scatter | 集合通信规约分散算子 | `torch.distributed.reduce_scatter_tensor` |
-| **AG** | All-Gather | 集合通信全收集算子 | `torch.distributed.all_gather_into_tensor` |
-| **GEMM** | General Matrix Multiply | 通用矩阵乘法 | INT8 W8A8 密集矩阵乘计算 |
-| **DCU** | Deep Computing Unit | 深度计算处理器芯片 | 海光 BW100 硬件计算核心 |
-| **GDN** | Gated Delta Network | 门控增量线性注意力 | Qwen3.8 特有的线性注意力网络 |
-| **KV** | Key-Value Cache | 键值缓存 | 变长与分页注意力缓存数据 |
-| **mRoPE** | Multimodal Rotary Position Embedding | 多模态旋转位置编码 | 多维位置编码算子 |
-| **NUMA** | Non-Uniform Memory Access | 非一致内存访问架构 | 进程硬绑定至本地 NUMA node 4 内存与 CPU |
-| **TTFT** | Time To First Token | 首字生成延迟 | 客户端首 Token 返回时间（秒） |
-
-### 2. 优化补丁明细表
-
-| 模块 | 优化内容 | 修改的底层文件 |
-| :--- | :--- | :--- |
-| **GDN 求解加速 (Issue 1)** | 移除 GDN 逆缓冲区冗余初始化，消除不必要的显存申请与内核启动延迟 | `sglang/srt/layers/attention/fla/chunk_fwd.py` |
-| **Cat-Free MLP 流水线** | 采用 Reduce-Scatter (RS) + 原地 All-Gather (AG) 8-Part 微流水线，重叠 GEMM 计算与通信，消除尾部 `torch.cat` 的显存重分配与内存拷贝开销 | `sglang/srt/layers/qwen27b_mlp_pipeline.py`<br>`sglang/srt/layers/qwen27b_mlp_probe.py` |
-| **hipBLASLt 矩阵乘派发** | 针对海光 BW100 DCU 矩阵核固化 10 形状 GEMM 派发白名单（覆盖 4K 常见维度及 64K 超长上下文），跳过动态核函数搜索 | `sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_w8a8_int8.py`<br>`sglang/srt/layers/quantization/compressed_tensors/schemes/q38_bw100_legacy_gemm_dispatch.py` |
-| **GDN 线性注意力加速** | 4-warp Triton 算子融合 GDN Prepare 投影，批元数据预计算，优化 Chunk 状态视图与 LayerNorm Gated 连续访存 | `sglang/srt/layers/attention/linear/gdn_backend.py`<br>`sglang/srt/layers/attention/linear/kernels/gdn_triton.py`<br>`sglang/srt/layers/attention/fla/chunk.py`<br>`sglang/srt/layers/attention/fla/chunk_delta_h.py`<br>`sglang/srt/layers/attention/fla/chunk_o.py`<br>`sglang/srt/layers/attention/fla/layernorm_gated.py` |
-| **Paged KV 打包重排** | Prefill 阶段针对变长序列对离散 Paged KV 缓存进行重排打包，消除注意力计算中的跨页碎片与访存气泡 | `sglang/srt/layers/attention/pack_paged_kv_to_varlen.py` |
-| **算子融合与图折叠** | Attention 输出门控 Sigmoid 计算与注意力计算图折叠融合；BF16 QK Normalization 与门控特征向量提取融合同步执行 | `sglang/srt/models/qwen3_5.py` |
-| **一维因果卷积网格调优** | 调整 Causal Conv1d Triton Launch 调度网格尺寸为 `BLOCK_M=64, BLOCK_N=512`，充分打满海光 DCU 计算单元流处理器吞吐 | `sglang/srt/layers/attention/mamba/causal_conv1d_triton.py`<br>`sglang/srt/layers/attention/mamba/causal_conv1d_ttft.py` |
-| **分块向量化位置编码** | Token-Tiled 分块向量化加载机制，消除旋转位置编码跨维度离散步长加载，提升长文本与多模态下连续访存效率 | `sglang/srt/layers/rotary_embedding/triton_kernels.py`<br>`sglang/srt/layers/rotary_embedding/mrope_tiled.py` |
-| **硬件拓扑与服务调度协同** | 双卡硬件硬绑定至本节点 NUMA node 4 内存与 CPU；限制 NCCL 通道数为 8 避免与 GEMM 算力争用；调优分块预填参数为 `CHUNKED_PREFILL_SIZE=16384` 与 `MAX_PREFILL_TOKENS=32768` | `patch/ttft_combo/start_server.sh`<br>`scripts/start_server.sh` |
 
