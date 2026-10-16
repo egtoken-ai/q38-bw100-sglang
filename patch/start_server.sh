@@ -37,7 +37,7 @@ PAGE_SIZE=${PAGE_SIZE:-64}
 CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-128}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-triton}
 
-LOG_FILE="${LOG_DIR}/server.log"
+LOG_FILE=${LOG_FILE:-"${LOG_DIR}/server.log"}
 
 echo "================================================================"
 echo "准备启动 SGLang 推理服务"
