@@ -10,7 +10,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RESULT_BASE_DIR="${PROJECT_DIR}/result/sharegpt"
+RESULT_BASE_DIR=${RESULT_BASE_DIR:-"${PROJECT_DIR}/result/sharegpt"}
 
 BASE_URL=${BASE_URL:-"http://127.0.0.1:18580"}
 MODEL_PATH=${MODEL_PATH:-"/model"}

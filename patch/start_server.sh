@@ -88,12 +88,26 @@ if [ -n "${PACK_PAGED_KV_TO_VARLEN:-}" ]; then
   LAUNCH_CMD+=(--pack-paged-kv-to-varlen "${PACK_PAGED_KV_TO_VARLEN}")
 fi
 
-# Explicit local NUMA mapping for HIP_VISIBLE_DEVICES=4,5 (logical TP ranks 0,1).
-if [ "$HIP_VISIBLE_DEVICES" != "4,5" ] || [ "$TP_SIZE" != "2" ]; then
-  echo "NUMA candidate requires HIP_VISIBLE_DEVICES=4,5 and TP_SIZE=2" >&2
-  exit 2
+# Explicit local NUMA mapping for TP_SIZE=2
+if [ "$TP_SIZE" = "2" ]; then
+  case "${HIP_VISIBLE_DEVICES// /}" in
+    "2,3")
+      LAUNCH_CMD+=(--numa-node 0 0)
+      ;;
+    "4,5")
+      LAUNCH_CMD+=(--numa-node 4 4)
+      ;;
+    "6,7")
+      LAUNCH_CMD+=(--numa-node 4 4)
+      ;;
+    "0,1")
+      LAUNCH_CMD+=(--numa-node 0 0)
+      ;;
+    *)
+      echo "提示: 未预设的 HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES}，跳过显式 --numa-node 参数"
+      ;;
+  esac
 fi
-LAUNCH_CMD+=(--numa-node 4 4)
 
 if [ "${RUN_IN_BACKGROUND}" = true ]; then
   echo "正在后台启动服务，日志记录至: ${LOG_FILE}"
