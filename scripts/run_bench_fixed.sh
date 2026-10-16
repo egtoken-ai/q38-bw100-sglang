@@ -17,6 +17,10 @@ RESULT_BASE_DIR=${RESULT_BASE_DIR:-"${PROJECT_DIR}/result/fixed"}
 BASE_URL=${BASE_URL:-"http://127.0.0.1:18580"}
 MODEL_NAME=${MODEL_NAME:-"Qwen3.8-27B-Channel-INT8-w8a8"}
 SCENARIO=${1:-"all"} # 可选: all, 4k, 64k
+WARMUP_ROUNDS=${WARMUP_ROUNDS:-2}
+MEASURE_ROUNDS=${MEASURE_ROUNDS:-3}
+CONCS_4K=${CONCS_4K:-"1 8 16 32 64 128"}
+CONCS_64K=${CONCS_64K:-"1 8 16 32"}
 
 mkdir -p "${RESULT_BASE_DIR}"
 
@@ -34,7 +38,7 @@ run_single_fixed() {
   echo "----------------------------------------------------------------"
   echo ">>> 开始执行测试: 输入=${input_len}, 输出=${output_len}, 并发=${concurrency}"
   echo "    输出目录: ${output_dir}"
-  echo "    轮次配置: 预热 2 轮, 测量 3 轮, 每轮 ${reqs_per_round} 请求"
+  echo "    轮次配置: 预热 ${WARMUP_ROUNDS} 轮, 测量 ${MEASURE_ROUNDS} 轮, 每轮 ${reqs_per_round} 请求"
   echo "----------------------------------------------------------------"
 
   python3 -u "${BENCH_PY}" \
@@ -44,8 +48,8 @@ run_single_fixed() {
     --input-len "${input_len}" \
     --output-len "${output_len}" \
     --concurrency "${concurrency}" \
-    --warmup-rounds 2 \
-    --measure-rounds 3 \
+    --warmup-rounds "${WARMUP_ROUNDS}" \
+    --measure-rounds "${MEASURE_ROUNDS}" \
     --requests-per-round "${reqs_per_round}" \
     --seed 20260912 \
     --timeout 3600
@@ -54,8 +58,7 @@ run_single_fixed() {
 # 1. 4K 输入 / 1K 输出测试集
 if [ "${SCENARIO}" = "all" ] || [ "${SCENARIO}" = "4k" ]; then
   echo "=== [阶段 1] 启动 4K 输入 / 1K 输出 固定长度压测 ==="
-  CONCS_4K=(1 8 16 32 64 128)
-  for c in "${CONCS_4K[@]}"; do
+  for c in ${CONCS_4K}; do
     run_single_fixed 4096 1024 "${c}"
   done
 fi
@@ -63,8 +66,7 @@ fi
 # 2. 64K 输入 / 1K 输出测试集
 if [ "${SCENARIO}" = "all" ] || [ "${SCENARIO}" = "64k" ]; then
   echo "=== [阶段 2] 启动 64K 输入 / 1K 输出 固定长度压测 ==="
-  CONCS_64K=(1 8 16 32)
-  for c in "${CONCS_64K[@]}"; do
+  for c in ${CONCS_64K}; do
     run_single_fixed 65536 1024 "${c}"
   done
 fi
