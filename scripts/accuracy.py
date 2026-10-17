@@ -550,7 +550,7 @@ def parser():
     p.add_argument('--eval-workers', type=int, default=4)
     p.add_argument('--code-timeout', type=int, default=6, help='LiveCodeBench timeout per test case, seconds')
     p.add_argument('--limit', type=int, default=0, help='Smoke test first N questions; cannot receive PASS')
-    p.add_argument('--extra-body', default='{}', help='JSON, e.g. {"chat_template_kwargs":{"enable_thinking":true}}')
+    p.add_argument('--extra-body', default='{"chat_template_kwargs":{"enable_thinking":false}}', help='JSON, e.g. {"chat_template_kwargs":{"enable_thinking":true}}')
     p.add_argument('--math-judge', choices=['local', 'api'], default='local')
     p.add_argument('--judge-base-url', default='', help='Independent answer-extraction API, including /v1')
     p.add_argument('--judge-model', default='')
