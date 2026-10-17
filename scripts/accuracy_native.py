@@ -356,8 +356,8 @@ def parser():
     p.add_argument('--timeout', type=int, default=3600)
     p.add_argument('--temperature', type=float, default=0.0)
     p.add_argument('--seed', type=int, default=20261012)
-    p.add_argument('--tokenizer-path', default='gpt-4', help='Native API adapter token-counting tokenizer; may be a local tokenizer directory')
-    p.add_argument('--extra-body', default='{}')
+    p.add_argument('--tokenizer-path', default='/model' if Path('/model').exists() else 'gpt-4', help='Native API adapter token-counting tokenizer; may be a local tokenizer directory')
+    p.add_argument('--extra-body', default='{"chat_template_kwargs":{"enable_thinking":false}}', help='JSON string merged into the model configuration')
     p.add_argument('--judge-base-url', default=os.environ.get('ACCURACY_JUDGE_BASE_URL', ''))
     p.add_argument('--judge-model', default=os.environ.get('ACCURACY_JUDGE_MODEL', ''))
     return p
