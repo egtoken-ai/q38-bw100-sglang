@@ -2,8 +2,6 @@
 
 新增入口：`bash scripts/run_accuracy_native.sh`，或 `bash scripts/run.sh accuracy-native`。旧版 `run_accuracy.sh` 保留。
 
-入口分支、原生框架调用和报告汇总的流程图见 [脚本调用流程](accuracy-native-flow.md)。
-
 这个版本**真正启动上游 CLI 子进程**，提示词渲染、模型请求、并发重试、原始预测保存、断点恢复和评分都由原生框架负责。外层 Python 只负责数据准备、配置生成、命令启动、结果完整性检查及阈值报告，不调用旧版的 `generate`、`run_one`、`score_benchmark`。
 
 | 基准 | 原生执行方式 | 固定协议 |
