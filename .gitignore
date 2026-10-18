@@ -15,8 +15,6 @@ venv/
 /.codex/goals/
 
 # Logs & Benchmark results
-logs/**
-!logs/.gitkeep
 result/**.jsonl
 
 # OS
