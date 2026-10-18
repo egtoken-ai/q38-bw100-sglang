@@ -15,9 +15,9 @@ venv/
 /.codex/goals/
 
 # Logs & Benchmark results
-logs/*.log
-result/**
-!result/.gitkeep
+logs/**
+!logs/.gitkeep
+result/**.jsonl
 
 # OS
 .DS_Store

@@ -1,0 +1,5 @@
+﻿benchmark,baseline,threshold,score,drop_pp,evaluated,expected,status,error,protocol,math_judge,source
+GSM8K,97.0,95.0,95.2994692949204,1.7005307050796006,1319,1319,PASS,,OpenCompass native CLI; gsm8k; accuracy; n=1,,/bench/result/release/accuracy/opencompass/gsm8k/native/results/q38/gsm8k.json
+LiveCodeBench v6,90.3,88.3,63.42857142857143,26.871428571428567,175,175,FAIL,,OpenCompass native CLI; livecodebench_v6; pass@1; n=1,,/bench/result/release/accuracy/opencompass/livecodebench/native/results/q38/livecodebench_v6.json
+RealWorldQA,85.9,83.9,56.99346405228758,28.906535947712428,765,765,FAIL,,VLMEvalKit native CLI; RealWorldQA,,/bench/result/release/accuracy/vlmeval/realworldqa/q38/T20261017-234736/status.json
+MathVision (Without CI),90.0,88.0,,,0,304,ERROR,Native evaluation not complete: done; mode_infer,MathVision_MINI / testmini; zero-shot; no code interpreter,,

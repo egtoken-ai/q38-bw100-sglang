@@ -1,0 +1,63 @@
+{
+  "created_at": "2026-10-17T23:49:24.565819+00:00",
+  "engine": "native-cli",
+  "overall": "INCOMPLETE",
+  "results": [
+    {
+      "benchmark": "GSM8K",
+      "baseline": 97.0,
+      "threshold": 95.0,
+      "score": 95.2994692949204,
+      "drop_pp": 1.7005307050796006,
+      "evaluated": 1319,
+      "expected": 1319,
+      "status": "PASS",
+      "error": "",
+      "protocol": "OpenCompass native CLI; gsm8k; accuracy; n=1",
+      "math_judge": null,
+      "source": "/bench/result/release/accuracy/opencompass/gsm8k/native/results/q38/gsm8k.json"
+    },
+    {
+      "benchmark": "LiveCodeBench v6",
+      "baseline": 90.3,
+      "threshold": 88.3,
+      "score": 63.42857142857143,
+      "drop_pp": 26.871428571428567,
+      "evaluated": 175,
+      "expected": 175,
+      "status": "FAIL",
+      "error": "",
+      "protocol": "OpenCompass native CLI; livecodebench_v6; pass@1; n=1",
+      "math_judge": null,
+      "source": "/bench/result/release/accuracy/opencompass/livecodebench/native/results/q38/livecodebench_v6.json"
+    },
+    {
+      "benchmark": "RealWorldQA",
+      "baseline": 85.9,
+      "threshold": 83.9,
+      "score": 56.99346405228758,
+      "drop_pp": 28.906535947712428,
+      "evaluated": 765,
+      "expected": 765,
+      "status": "FAIL",
+      "error": "",
+      "protocol": "VLMEvalKit native CLI; RealWorldQA",
+      "math_judge": null,
+      "source": "/bench/result/release/accuracy/vlmeval/realworldqa/q38/T20261017-234736/status.json"
+    },
+    {
+      "benchmark": "MathVision (Without CI)",
+      "baseline": 90.0,
+      "threshold": 88.0,
+      "score": null,
+      "drop_pp": null,
+      "evaluated": 0,
+      "expected": 304,
+      "status": "ERROR",
+      "error": "Native evaluation not complete: done; mode_infer",
+      "protocol": "MathVision_MINI / testmini; zero-shot; no code interpreter",
+      "math_judge": null,
+      "source": ""
+    }
+  ]
+}
